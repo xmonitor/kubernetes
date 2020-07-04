@@ -22,6 +22,8 @@ package counter
 // goroutines to the test code, so that the test code can advance a fake
 // clock when and only when the code being tested has finished all
 // the work that is ready to do at the present time.
+//
+// 用于跟踪活跃的的 gr 的数目。可认为是一个伪定时器。
 type GoRoutineCounter interface {
 	// Add adds the given delta to the count of active goroutines.
 	// Call Add(1) before forking a goroutine, Add(-1) at the end of that goroutine.
@@ -29,5 +31,8 @@ type GoRoutineCounter interface {
 	// just before a `select`).
 	// Call Add(1) just before doing something that unblocks a goroutine that is
 	// waiting on that something.
+	//
+	// 当启动一个 gr 时，调用 Add(1)，gr 执行结束则调用 Add(-1)。
+	// 当要等待一个 gr 执行任务时，调用 Add(-1)，当有 gr 开始执行任务的时候，调用  Add(1)。
 	Add(delta int)
 }

@@ -38,6 +38,12 @@ type Info interface {
 	// delegation flows
 	// In order to faithfully round-trip through an impersonation flow, these keys
 	// MUST be lowercase.
+	//
+	// extra 数据主要包含了 authenticator 进行 auth 时需要用到的数据。
+	// 一个例子是获取 token 的作用域: key 应当是 authenticator 所在的 namespace
+	// 或者 authenticator/authorizer，如 "example.org/foo"。
+	//
+	// 所有的 key 都必须是 小写。
 	GetExtra() map[string][]string
 }
 

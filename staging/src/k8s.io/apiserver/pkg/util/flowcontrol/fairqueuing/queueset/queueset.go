@@ -19,6 +19,7 @@ package queueset
 import (
 	"context"
 	"fmt"
+	"k8s.io/klog"
 	"math"
 	"sync"
 	"time"
@@ -89,6 +90,13 @@ type queueSet struct {
 	queues []*queue
 
 	// virtualTime is the number of virtual seconds since process startup
+	//
+	// QueueSet.virtualTime 初始化的时候赋值为 0。
+	// 此后，如果 QueueSet 中的 queue 如有任何状态变化，都要执行更新，根据自身两次变更历经的 realTime 按比例增加，
+	// 这个比例计算方式为：min(QueueSet 中执行的请求数, PL 的并发配额) / QueueSet 中活跃的 queue 数目。
+	//
+	// virtualTime 实际对应与 bit-by-bit round-robin 算法中的 R(t)，当前时间 round-robin 轮数。
+	//  具体可以参考 http://www.iitg.ac.in/nselvaraju/ma402_2007/Assignments/04010605_tp.pdf
 	virtualTime float64
 
 	// lastRealTime is what `clock.Now()` yielded when `virtualTime` was last updated
@@ -222,6 +230,8 @@ const (
 // executing at each point where there is a change in that quantity,
 // because the metrics --- and only the metrics --- track that
 // quantity per FlowSchema.
+//
+//
 func (qs *queueSet) StartRequest(ctx context.Context, hashValue uint64, flowDistinguisher, fsName string, descr1, descr2 interface{}) (fq.Request, bool) {
 	qs.lockAndSyncTime()
 	defer qs.lock.Unlock()
@@ -230,8 +240,10 @@ func (qs *queueSet) StartRequest(ctx context.Context, hashValue uint64, flowDist
 	// ========================================================================
 	// Step 0:
 	// Apply only concurrency limit, if zero queues desired
+	// qs 的 队列数目为0，只有可能是 exempt 任务
 	if qs.qCfg.DesiredNumQueues < 1 {
 		if qs.totRequestsExecuting >= qs.dCfg.ConcurrencyLimit {
+			// 如果当前执行的任务数目已经超过 qs 的 qps 上限，则拒绝执行任务
 			klog.V(5).Infof("QS(%s): rejecting request %q %#+v %#+v because %d are executing and the limit is %d", qs.qCfg.Name, fsName, descr1, descr2, qs.totRequestsExecuting, qs.dCfg.ConcurrencyLimit)
 			metrics.AddReject(qs.qCfg.Name, fsName, "concurrency-limit")
 			return nil, qs.isIdleLocked()
@@ -247,6 +259,12 @@ func (qs *queueSet) StartRequest(ctx context.Context, hashValue uint64, flowDist
 	// 3) Reject current request if there is not enough concurrency shares and
 	// we are at max queue length
 	// 4) If not rejected, create a request and enqueue
+	//
+	// 从 qs 中选取一个队列，然后入队：
+	// 1 通过 shuffle 算法，选取一个队列；
+	// 2 从队列中删掉已经等待超时的 requests；
+	// 3 如果队列已经满了，则拒掉当前请求；
+	// 4 包装一个请求，然后入队列.
 	req = qs.timeoutOldRequestsAndRejectOrEnqueueLocked(ctx, hashValue, flowDistinguisher, fsName, descr1, descr2)
 	// req == nil means that the request was rejected - no remaining
 	// concurrency shares and at max queue length already
@@ -265,6 +283,8 @@ func (qs *queueSet) StartRequest(ctx context.Context, hashValue uint64, flowDist
 	// assured concurrency value.  The body of the loop uses the
 	// fair queuing technique to pick a queue and dispatch a
 	// request from that queue.
+	//
+	// 调用公平算法并行执行所有可执行的任务，直到没有可执行的任务或者达到队列 qps 的上限；
 	qs.dispatchAsMuchAsPossibleLocked()
 
 	// ========================================================================
@@ -274,6 +294,7 @@ func (qs *queueSet) StartRequest(ctx context.Context, hashValue uint64, flowDist
 	// of well-counted goroutines. We Are Told that every
 	// request's context's Done channel gets closed by the time
 	// the request is done being processed.
+	// 如果任务开始执行，则其 done channel 就会被关闭。
 	doneCh := ctx.Done()
 	if doneCh != nil {
 		qs.preCreateOrUnblockGoroutine()
@@ -300,7 +321,7 @@ func (req *request) Finish(execFn func()) bool {
 	if !exec {
 		return idle
 	}
-	execFn()
+	execFn() // 执行任务
 	return req.qs.finishRequestAndDispatchAsMuchAsPossible(req)
 }
 
@@ -319,6 +340,8 @@ func (req *request) wait() (bool, bool) {
 	// Step 4:
 	// The final step is to wait on a decision from
 	// somewhere and then act on it.
+	//
+	// 里面包含一个条件锁，阻塞，等待唤醒
 	decisionAny := req.decision.GetLocked()
 	qs.syncTimeLocked()
 	decision, isDecision := decisionAny.(requestDecision)
@@ -365,18 +388,24 @@ func (qs *queueSet) lockAndSyncTime() {
 // that the current state of the queues has been in effect since
 // `qs.lastRealTime`.  Thus, it should be invoked after acquiring the
 // lock and before modifying the state of any queue.
+//
+// 更新 qs.virtualTime，如果 QueueSet 中的 queue 如有任何状态变化，这个函数都会被调用，
+// 都要执行更新，根据自身两次变更历经的 realTime 按比例增加
 func (qs *queueSet) syncTimeLocked() {
 	realNow := qs.clock.Now()
 	timeSinceLast := realNow.Sub(qs.lastRealTime).Seconds()
 	qs.lastRealTime = realNow
+	// virtualTime += realTime * 每个队列的平均任务数目
 	qs.virtualTime += timeSinceLast * qs.getVirtualTimeRatioLocked()
 }
 
 // getVirtualTimeRatio calculates the rate at which virtual time has
 // been advancing, according to the logic in `doc.go`.
+// 返回 set 中，每个队列的平均任务数目
 func (qs *queueSet) getVirtualTimeRatioLocked() float64 {
 	activeQueues := 0
 	reqs := 0
+	// 计算 qs 中活跃的队列的数目 activeQueues, 以及正在执行中的任务的总数
 	for _, queue := range qs.queues {
 		reqs += queue.requestsExecuting
 		if len(queue.requests) > 0 || queue.requestsExecuting > 0 {
@@ -386,6 +415,7 @@ func (qs *queueSet) getVirtualTimeRatioLocked() float64 {
 	if activeQueues == 0 {
 		return 0
 	}
+	// min(QueueSet 中执行的请求数, PL 的并发配额) / QueueSet 中活跃的 queue 数目
 	return math.Min(float64(reqs), float64(qs.dCfg.ConcurrencyLimit)) / float64(activeQueues)
 }
 
@@ -399,6 +429,12 @@ func (qs *queueSet) getVirtualTimeRatioLocked() float64 {
 // returns the enqueud request on a successful enqueue
 // returns nil in the case that there is no available concurrency or
 // the queuelengthlimit has been reached
+//
+// 从 qs 中选取一个队列，然后入队：
+// 1 通过 shuffle 算法，选取一个队列；
+// 2 从队列中删掉已经等待超时的 requests；
+// 3 如果队列已经满了，则拒掉当前请求；
+// 4 包装一个请求，然后入队列.
 func (qs *queueSet) timeoutOldRequestsAndRejectOrEnqueueLocked(ctx context.Context, hashValue uint64, flowDistinguisher, fsName string, descr1, descr2 interface{}) *request {
 	//	Start with the shuffle sharding, to pick a queue.
 	queueIdx := qs.chooseQueueIndexLocked(hashValue, descr1, descr2)
@@ -454,7 +490,9 @@ func (qs *queueSet) removeTimedOutRequestsFromQueueLocked(queue *queue, fsName s
 	// reqs are sorted oldest -> newest
 	// can short circuit loop (break) if oldest requests are not timing out
 	// as newer requests also will not have timed out
+	// 队列中的任务已经是时间递增有序的
 
+	// waitTime 是队列中可允许的最早的任务的创建时间[服务器收到请求的时间]
 	// now - requestWaitLimit = waitLimit
 	waitLimit := now.Add(-qs.qCfg.RequestWaitLimit)
 	for i, req := range reqs {
@@ -468,6 +506,7 @@ func (qs *queueSet) removeTimedOutRequestsFromQueueLocked(queue *queue, fsName s
 		}
 	}
 	// remove timed out requests from queue
+	// 删除老旧请求
 	if timeoutIdx != -1 {
 		// timeoutIdx + 1 to remove the last timeout req
 		removeIdx := timeoutIdx + 1
@@ -482,6 +521,7 @@ func (qs *queueSet) removeTimedOutRequestsFromQueueLocked(queue *queue, fsName s
 // request, which has been assigned to a queue.  If up against the
 // queue length limit and the concurrency limit then returns false.
 // Otherwise enqueues and returns true.
+// 如果请求数目超过 qs 的 qps 上限，或者队列长度超限，则拒绝请求入队
 func (qs *queueSet) rejectOrEnqueueLocked(request *request) bool {
 	queue := request.queue
 	curQueueLength := len(queue.requests)
@@ -500,6 +540,7 @@ func (qs *queueSet) enqueueLocked(request *request) {
 	queue := request.queue
 	if len(queue.requests) == 0 && queue.requestsExecuting == 0 {
 		// the queue’s virtual start time is set to the virtual time.
+		// 如果队列初次启用，则其初始预期任务执行时间 = qs 当前的预期执行时间
 		queue.virtualStart = qs.virtualTime
 		if klog.V(6).Enabled() {
 			klog.Infof("QS(%s) at r=%s v=%.9fs: initialized queue %d virtual start time due to request %#+v %#+v", qs.qCfg.Name, qs.clock.Now().Format(nsTimeFmt), queue.virtualStart, queue.index, request.descr1, request.descr2)
@@ -516,6 +557,13 @@ func (qs *queueSet) enqueueLocked(request *request) {
 // technique to pick a queue, dequeue the request at the head of that
 // queue, increment the count of the number executing, and send true
 // to the request's channel.
+//
+// 执行尽可能多的任务，任务数目上限是 qs.dCfg.ConcurrencyLimit。
+// 总体流程：
+//  1 选中一个 queue；
+//  2 把队列中第一个 request 出队；
+//  3 增加 qs 中正在执行的任务的数目；
+//  4 向 request 的 channel 发出一个任务执行信号；
 func (qs *queueSet) dispatchAsMuchAsPossibleLocked() {
 	for qs.totRequestsWaiting != 0 && qs.totRequestsExecuting < qs.dCfg.ConcurrencyLimit {
 		ok := qs.dispatchLocked()
@@ -551,6 +599,8 @@ func (qs *queueSet) dispatchSansQueueLocked(ctx context.Context, flowDistinguish
 // select a queue and dispatch the oldest request in that queue.  The
 // return value indicates whether a request was dispatched; this will
 // be false when there are no requests waiting in any queue.
+//
+// 调用公平队列算法选出一个 q，然后处理 q 中 oldest 待处理的任务。如果没有任务可处理，则返回 false。
 func (qs *queueSet) dispatchLocked() bool {
 	queue := qs.selectQueueLocked()
 	if queue == nil {
@@ -575,6 +625,8 @@ func (qs *queueSet) dispatchLocked() bool {
 		klog.Infof("QS(%s) at r=%s v=%.9fs: dispatching request %#+v %#+v from queue %d with virtual start time %.9fs, queue will have %d waiting & %d executing", qs.qCfg.Name, request.startTime.Format(nsTimeFmt), qs.virtualTime, request.descr1, request.descr2, queue.index, queue.virtualStart, len(queue.requests), queue.requestsExecuting)
 	}
 	// When a request is dequeued for service -> qs.virtualStart += G
+	//
+	// 队列中下一个任务的预期开始时间是当前时间 += qset 平均任务预计执行时间
 	queue.virtualStart += qs.estimatedServiceTime
 	request.decision.SetLocked(decisionExecute)
 	return ok
@@ -608,6 +660,7 @@ func (qs *queueSet) cancelWait(req *request) {
 // selectQueueLocked examines the queues in round robin order and
 // returns the first one of those for which the virtual finish time of
 // the oldest waiting request is minimal.
+// 估算队列中 oldest 任务的预期执行完毕时间，返回队列集合中预期执行完毕时间最小的 queue
 func (qs *queueSet) selectQueueLocked() *queue {
 	minVirtualFinish := math.Inf(1)
 	var minQueue *queue
@@ -637,6 +690,10 @@ func (qs *queueSet) selectQueueLocked() *queue {
 // as many requests as possible.  This is all of what needs to be done
 // once a request finishes execution or is canceled.  This returns a bool
 // indicating whether the QueueSet is now idle.
+//
+// task1: 调用 finishRequest；
+// task2: dispatch 尽可能多的任务；
+// 返回值 bool 指明 @qs 是否还有处理能力；
 func (qs *queueSet) finishRequestAndDispatchAsMuchAsPossible(req *request) bool {
 	qs.lockAndSyncTime()
 	defer qs.lock.Unlock()
@@ -649,6 +706,8 @@ func (qs *queueSet) finishRequestAndDispatchAsMuchAsPossible(req *request) bool 
 // finishRequestLocked is a callback that should be used when a
 // previously dispatched request has completed it's service.  This
 // callback updates important state in the queueSet
+//
+// 主要用来修改 qs 的各个字段：qs 和 q 的正在执行的任务数目、queue 的 virtualStart、删除多余的队列
 func (qs *queueSet) finishRequestLocked(r *request) {
 	qs.totRequestsExecuting--
 	metrics.AddRequestsExecuting(qs.qCfg.Name, r.fsName, -1)
@@ -675,6 +734,8 @@ func (qs *queueSet) finishRequestLocked(r *request) {
 
 	// If there are more queues than desired and this one has no
 	// requests then remove it
+	//
+	// 如果 qs 中的 q 的数目超过配置数，且 q 中还没有需求了，则删除这个 q。
 	if len(qs.queues) > qs.qCfg.DesiredNumQueues &&
 		len(r.queue.requests) == 0 &&
 		r.queue.requestsExecuting == 0 {

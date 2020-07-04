@@ -147,23 +147,31 @@ type PriorityLevelConfigurationReference struct {
 // making the request, the verb being requested, and the resource to be acted upon. This PolicyRulesWithSubjects matches
 // a request if and only if both (a) at least one member of subjects matches the request and (b) at least one member
 // of resourceRules or nonResourceRules matches the request.
+//
+// match 的对象有发起请求的 subject，请求的 verb，以及 vert 的对象 resource。
+// request match 某个 fs 的条件：
+// 1 subject 至少匹配 fs 中 subjects 中的一个；
+// 2 请求的 verb+resource 至少匹配 resources 或者 non-resouces 中的一个；
 type PolicyRulesWithSubjects struct {
 	// subjects is the list of normal user, serviceaccount, or group that this rule cares about.
 	// There must be at least one member in this slice.
 	// A slice that includes both the system:authenticated and system:unauthenticated user groups matches every request.
 	// +listType=atomic
 	// Required.
+	// subjects 包含了 subject、group 或者 ServiceAccount
 	Subjects []Subject `json:"subjects" protobuf:"bytes,1,rep,name=subjects"`
 	// `resourceRules` is a slice of ResourcePolicyRules that identify matching requests according to their verb and the
 	// target resource.
 	// At least one of `resourceRules` and `nonResourceRules` has to be non-empty.
 	// +listType=atomic
 	// +optional
+	// 匹配 verb + 目标 resource
 	ResourceRules []ResourcePolicyRule `json:"resourceRules,omitempty" protobuf:"bytes,2,opt,name=resourceRules"`
 	// `nonResourceRules` is a list of NonResourcePolicyRules that identify matching requests according to their verb
 	// and the target non-resource URL.
 	// +listType=atomic
 	// +optional
+	// 对 vert + non-resource 进行匹配
 	NonResourceRules []NonResourcePolicyRule `json:"nonResourceRules,omitempty" protobuf:"bytes,3,opt,name=nonResourceRules"`
 }
 

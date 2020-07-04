@@ -38,6 +38,7 @@ type promisoid struct {
 	value         interface{}
 }
 
+// 获取任务
 func (pr *promisoid) Get() interface{} {
 	pr.lock.Lock()
 	defer pr.lock.Unlock()
@@ -63,6 +64,7 @@ func (pr *promisoid) IsSetLocked() bool {
 	return pr.isSet
 }
 
+// 设置任务
 func (pr *promisoid) SetLocked(value interface{}) {
 	pr.isSet = true
 	pr.value = value

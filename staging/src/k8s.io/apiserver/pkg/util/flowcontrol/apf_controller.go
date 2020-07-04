@@ -22,8 +22,11 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"k8s.io/klog"
+	"k8s.io/kubernetes/pkg/apis/flowcontrol"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -60,6 +63,9 @@ import (
 // change to any config object, or when any priority level that is
 // undesired becomes completely unused, all the config objects are
 // read and processed as a whole.
+//
+// 这个文件包含了一个简单的 controller，它存有 FlowSchema 和 PriorityLevelConfiguration
+// 相关信息，以供 filter 使用。
 
 // StartFunction begins the process of handlig a request.  If the
 // request gets queued then this function uses the given hashValue as
@@ -70,12 +76,17 @@ import (
 // then `afterExecution` is irrelevant and the request should be
 // rejected.  Otherwise the request should be executed and
 // `afterExecution` must be called exactly once.
+//
+// StartFunction 用于处理一个请求。如果请求入队，则这个函数已有就用其 hashValue 代表这个 request。
+// 后面寻找队列时进行的 shuffle 入队都使用此值。@descr1 & @descr2 仅仅用于日志记录。
+// 这个函数返回，以为着请求或者被入队或者被拒绝，返回值 @execute 可作为代表。
+// 如果 @execute 为 true，则 @afterExecution 应当被执行。
 type StartFunction func(ctx context.Context, hashValue uint64) (execute bool, afterExecution func())
 
 // RequestDigest holds necessary info from request for flow-control
 type RequestDigest struct {
-	RequestInfo *request.RequestInfo
-	User        user.Info
+	RequestInfo *request.RequestInfo // 请求内容
+	User        user.Info   // 请求的用户信息
 }
 
 // `*configController` maintains eventual consistency with the API
@@ -83,6 +94,9 @@ type RequestDigest struct {
 // procedural interface to the configured behavior.  The methods of
 // this type and cfgMeal follow the convention that the suffix
 // "Locked" means that the caller must hold the configController lock.
+//
+// configController 的 functions 一起其他 struct 的 funcs 名称末尾有 "Locked"
+// 的，则调用者要确保加锁后才能调用。
 type configController struct {
 	queueSetFactory fq.QueueSetFactory
 
@@ -130,20 +144,20 @@ type priorityLevelState struct {
 
 	// qsCompleter holds the QueueSetCompleter derived from `config`
 	// and `queues` if config is not exempt, nil otherwise.
-	qsCompleter fq.QueueSetCompleter
+	qsCompleter fq.QueueSetCompleter //
 
 	// The QueueSet for this priority level.  This is nil if and only
 	// if the priority level is exempt.
-	queues fq.QueueSet
+	queues fq.QueueSet // 存储所有的队列
 
 	// quiescing==true indicates that this priority level should be
 	// removed when its queues have all drained.  May be true only if
 	// queues is non-nil.
-	quiescing bool
+	quiescing bool // 如上注释，其值为 true 时，则所有所有请求都处理完毕后队列应当被销毁
 
 	// number of goroutines between Controller::Match and calling the
 	// returned StartFunction
-	numPending int
+	numPending int // gr 数目
 }
 
 // NewTestableController is extra flexible to facilitate testing
@@ -619,6 +633,48 @@ func (immediateRequest) Finish(execute func()) bool {
 	return false
 }
 
+func (cfgCtl *configController) getListPLC(ri *request.RequestInfo) *fctypesv1a1.FlowSchema {
+	if !ri.IsResourceRequest {
+		return nil
+	}
+	if ri.Verb != "list" {
+		return nil
+	}
+
+	fslg := len(cfgCtl.flowSchemas)
+	getfs := func(name string) *fctypesv1a1.FlowSchema {
+		for idx := fslg-1; idx >= 0; idx-- {
+			if cfgCtl.flowSchemas[idx].Name == name {
+				return cfgCtl.flowSchemas[idx]
+			}
+		}
+
+		return nil
+	}
+
+	// field selector
+	if strings.Contains(ri.Path, "fieldSelector") {
+		return getfs("fs-list-field")
+	}
+
+	// label selector
+	if strings.Contains(ri.Path, "labelSelector") {
+		return getfs("fs-list-label")
+	}
+
+	if len(ri.Namespace) != 0 {
+		// list all
+		if ri.Namespace == metav1.NamespaceAll || ri.Namespace == metav1.NamespaceNone {
+			return getfs("fs-list-all")
+		}
+
+		// list namespace
+		return getfs("fs-list-namespace")
+	}
+
+	return nil
+}
+
 // startRequest classifies and, if appropriate, enqueues the request.
 // Returns a nil Request if and only if the request is to be rejected.
 // The returned bool indicates whether the request is exempt from
@@ -628,32 +684,42 @@ func (cfgCtl *configController) startRequest(ctx context.Context, rd RequestDige
 	klog.V(7).Infof("startRequest(%#+v)", rd)
 	cfgCtl.lock.Lock()
 	defer cfgCtl.lock.Unlock()
+
+	f := func(fs *fctypesv1a1.FlowSchema)(*fctypesv1a1.FlowSchema, *fctypesv1a1.PriorityLevelConfiguration, bool, fq.Request, time.Time) {
+		plName := fs.Spec.PriorityLevelConfiguration.Name
+		plState := cfgCtl.priorityLevelStates[plName]
+		if plState.pl.Spec.Type == fctypesv1a1.PriorityLevelEnablementExempt {
+			klog.V(7).Infof("startRequest(%#+v) => fsName=%q, distMethod=%#+v, plName=%q, immediate", rd, fs.Name, fs.Spec.DistinguisherMethod, plName)
+			return fs, plState.pl, true, immediateRequest{}, time.Time{}
+		}
+		var numQueues int32
+		if plState.pl.Spec.Limited.LimitResponse.Type == fctypesv1a1.LimitResponseTypeQueue {
+			numQueues = plState.pl.Spec.Limited.LimitResponse.Queuing.Queues
+
+		}
+		var flowDistinguisher string
+		var hashValue uint64
+		if numQueues > 1 {
+			flowDistinguisher = computeFlowDistinguisher(rd, fs.Spec.DistinguisherMethod)
+			hashValue = hashFlowID(fs.Name, flowDistinguisher)
+		}
+		startWaitingTime = time.Now()
+		klog.V(7).Infof("startRequest(%#+v) => fsName=%q, distMethod=%#+v, plName=%q, numQueues=%d", rd, fs.Name, fs.Spec.DistinguisherMethod, plName, numQueues)
+		req, idle := plState.queues.StartRequest(ctx, hashValue, flowDistinguisher, fs.Name, rd.RequestInfo, rd.User)
+		if idle {
+			cfgCtl.maybeReapLocked(plName, plState)
+		}
+		return fs, plState.pl, false, req, startWaitingTime
+	}
+
+	// list current limiter
+	if fs := cfgCtl.getListPLC(rd.RequestInfo); fs != nil {
+		return f(fs)
+	}
+
 	for _, fs := range cfgCtl.flowSchemas {
 		if matchesFlowSchema(rd, fs) {
-			plName := fs.Spec.PriorityLevelConfiguration.Name
-			plState := cfgCtl.priorityLevelStates[plName]
-			if plState.pl.Spec.Type == fctypesv1a1.PriorityLevelEnablementExempt {
-				klog.V(7).Infof("startRequest(%#+v) => fsName=%q, distMethod=%#+v, plName=%q, immediate", rd, fs.Name, fs.Spec.DistinguisherMethod, plName)
-				return fs, plState.pl, true, immediateRequest{}, time.Time{}
-			}
-			var numQueues int32
-			if plState.pl.Spec.Limited.LimitResponse.Type == fctypesv1a1.LimitResponseTypeQueue {
-				numQueues = plState.pl.Spec.Limited.LimitResponse.Queuing.Queues
-
-			}
-			var flowDistinguisher string
-			var hashValue uint64
-			if numQueues > 1 {
-				flowDistinguisher = computeFlowDistinguisher(rd, fs.Spec.DistinguisherMethod)
-				hashValue = hashFlowID(fs.Name, flowDistinguisher)
-			}
-			startWaitingTime = time.Now()
-			klog.V(7).Infof("startRequest(%#+v) => fsName=%q, distMethod=%#+v, plName=%q, numQueues=%d", rd, fs.Name, fs.Spec.DistinguisherMethod, plName, numQueues)
-			req, idle := plState.queues.StartRequest(ctx, hashValue, flowDistinguisher, fs.Name, rd.RequestInfo, rd.User)
-			if idle {
-				cfgCtl.maybeReapLocked(plName, plState)
-			}
-			return fs, plState.pl, false, req, startWaitingTime
+			return f(fs)
 		}
 	}
 	// This can never happen because every configState has a

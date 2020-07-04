@@ -107,6 +107,7 @@ func serviceAccountMatchesNamespace(namespace string, username string) bool {
 	return strings.HasPrefix(username, ServiceAccountUsernameSeparator)
 }
 
+// Resource 匹配
 func matchesAResourceRule(ri *request.RequestInfo, rules []fctypesv1a1.ResourcePolicyRule) bool {
 	for _, rr := range rules {
 		if matchesResourcePolicyRule(ri, rr) {
@@ -116,10 +117,12 @@ func matchesAResourceRule(ri *request.RequestInfo, rules []fctypesv1a1.ResourceP
 	return false
 }
 
+// 匹配 vert、Resource、APIGroup 和 namespace
 func matchesResourcePolicyRule(ri *request.RequestInfo, policyRule fctypesv1a1.ResourcePolicyRule) bool {
 	if !matchPolicyRuleVerb(policyRule.Verbs, ri.Verb) {
 		return false
 	}
+
 	if !matchPolicyRuleResource(policyRule.Resources, ri.Resource, ri.Subresource) {
 		return false
 	}
@@ -141,6 +144,7 @@ func matchesANonResourceRule(ri *request.RequestInfo, rules []fctypesv1a1.NonRes
 	return false
 }
 
+// nonResource 匹配：匹配动作和url即可
 func matchesNonResourcePolicyRule(ri *request.RequestInfo, policyRule fctypesv1a1.NonResourcePolicyRule) bool {
 	if !matchPolicyRuleVerb(policyRule.Verbs, ri.Verb) {
 		return false
@@ -191,6 +195,7 @@ func matchPolicyRuleResource(policyRuleRequestResources []string, requestResourc
 // assumes that if `wildcard` is in `list` then it is the only member
 // of the list, which is enforced by validation.
 func containsString(x string, list []string, wildcard string) bool {
+	// list 长度为1，且内容为 `*`
 	if len(list) == 1 && list[0] == wildcard {
 		return true
 	}
