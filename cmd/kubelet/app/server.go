@@ -50,6 +50,7 @@ import (
 	"k8s.io/apiserver/pkg/server/healthz"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	clientset "k8s.io/client-go/kubernetes"
+	certificatesclient "k8s.io/client-go/kubernetes/typed/certificates/v1beta1"
 	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -456,7 +457,7 @@ func makeEventRecorder(kubeDeps *kubelet.Dependencies, nodeName types.NodeName) 
 	}
 	eventBroadcaster := record.NewBroadcaster()
 	kubeDeps.Recorder = eventBroadcaster.NewRecorder(legacyscheme.Scheme, v1.EventSource{Component: componentKubelet, Host: string(nodeName)})
-	eventBroadcaster.StartStructuredLogging(3)
+	eventBroadcaster.StartLogging(klog.V(3).Infof)
 	if kubeDeps.EventClient != nil {
 		klog.V(4).Infof("Sending events to api server.")
 		eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: kubeDeps.EventClient.Events("")})
@@ -805,7 +806,7 @@ func run(s *options.KubeletServer, kubeDeps *kubelet.Dependencies, featureGate f
 // buildKubeletClientConfig constructs the appropriate client config for the kubelet depending on whether
 // bootstrapping is enabled or client certificate rotation is enabled.
 func buildKubeletClientConfig(s *options.KubeletServer, nodeName types.NodeName) (*restclient.Config, func(), error) {
-	if s.RotateCertificates {
+	if s.RotateCertificates && utilfeature.DefaultFeatureGate.Enabled(features.RotateKubeletClientCertificate) {
 		// Rules for client rotation and the handling of kube config files:
 		//
 		// 1. If the client provides only a kubeconfig file, we must use that as the initial client
@@ -909,7 +910,7 @@ func updateDialer(clientConfig *restclient.Config) (func(), error) {
 // if no certificate is available, or the most recent clientConfig (which is assumed to point to the cert that the manager will
 // write out).
 func buildClientCertificateManager(certConfig, clientConfig *restclient.Config, certDir string, nodeName types.NodeName) (certificate.Manager, error) {
-	newClientsetFn := func(current *tls.Certificate) (clientset.Interface, error) {
+	newClientFn := func(current *tls.Certificate) (certificatesclient.CertificateSigningRequestInterface, error) {
 		// If we have a valid certificate, use that to fetch CSRs. Otherwise use the bootstrap
 		// credentials. In the future it would be desirable to change the behavior of bootstrap
 		// to always fall back to the external bootstrap credentials when such credentials are
@@ -918,7 +919,11 @@ func buildClientCertificateManager(certConfig, clientConfig *restclient.Config, 
 		if current != nil {
 			config = clientConfig
 		}
-		return clientset.NewForConfig(config)
+		client, err := clientset.NewForConfig(config)
+		if err != nil {
+			return nil, err
+		}
+		return client.CertificatesV1beta1().CertificateSigningRequests(), nil
 	}
 
 	return kubeletcertificate.NewKubeletClientCertificateManager(
@@ -933,7 +938,7 @@ func buildClientCertificateManager(certConfig, clientConfig *restclient.Config, 
 
 		clientConfig.CertFile,
 		clientConfig.KeyFile,
-		newClientsetFn,
+		newClientFn,
 	)
 }
 
@@ -1104,7 +1109,7 @@ func RunKubelet(kubeServer *options.KubeletServer, kubeDeps *kubelet.Dependencie
 		kubeServer.RegisterWithTaints,
 		kubeServer.AllowedUnsafeSysctls,
 		kubeServer.ExperimentalMounterPath,
-		kubeServer.KernelMemcgNotification,
+		kubeServer.ExperimentalKernelMemcgNotification,
 		kubeServer.ExperimentalCheckNodeCapabilitiesBeforeMount,
 		kubeServer.ExperimentalNodeAllocatableIgnoreEvictionThreshold,
 		kubeServer.MinimumGCAge,
@@ -1178,7 +1183,7 @@ func createAndInitKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	registerWithTaints []api.Taint,
 	allowedUnsafeSysctls []string,
 	experimentalMounterPath string,
-	kernelMemcgNotification bool,
+	experimentalKernelMemcgNotification bool,
 	experimentalCheckNodeCapabilitiesBeforeMount bool,
 	experimentalNodeAllocatableIgnoreEvictionThreshold bool,
 	minimumGCAge metav1.Duration,
@@ -1210,7 +1215,7 @@ func createAndInitKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		registerWithTaints,
 		allowedUnsafeSysctls,
 		experimentalMounterPath,
-		kernelMemcgNotification,
+		experimentalKernelMemcgNotification,
 		experimentalCheckNodeCapabilitiesBeforeMount,
 		experimentalNodeAllocatableIgnoreEvictionThreshold,
 		minimumGCAge,

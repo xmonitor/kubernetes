@@ -76,7 +76,7 @@ func getEventsFromChannel(ch <-chan *PodLifecycleEvent) []*PodLifecycleEvent {
 	return events
 }
 
-func createTestContainer(ID string, state kubecontainer.State) *kubecontainer.Container {
+func createTestContainer(ID string, state kubecontainer.ContainerState) *kubecontainer.Container {
 	return &kubecontainer.Container{
 		ID:    kubecontainer.ContainerID{Type: testContainerRuntimeType, ID: ID},
 		State: state,
@@ -136,8 +136,7 @@ func TestRelisting(t *testing.T) {
 	// The second relist should not send out any event because no container has
 	// changed.
 	pleg.relist()
-	actual = getEventsFromChannel(ch)
-	assert.True(t, len(actual) == 0, "no container has changed, event length should be 0")
+	verifyEvents(t, expected, actual)
 
 	runtime.AllPodList = []*containertest.FakePod{
 		{Pod: &kubecontainer.Pod{
@@ -337,7 +336,7 @@ func createTestPodsStatusesAndEvents(num int) ([]*kubecontainer.Pod, []*kubecont
 		}
 		status := &kubecontainer.PodStatus{
 			ID:                id,
-			ContainerStatuses: []*kubecontainer.Status{{ID: container.ID, State: cState}},
+			ContainerStatuses: []*kubecontainer.ContainerStatus{{ID: container.ID, State: cState}},
 		}
 		event := &PodLifecycleEvent{ID: pod.ID, Type: ContainerStarted, Data: container.ID.ID}
 		pods = append(pods, pod)
@@ -458,7 +457,7 @@ func TestRelistWithReinspection(t *testing.T) {
 
 	goodStatus := &kubecontainer.PodStatus{
 		ID:                podID,
-		ContainerStatuses: []*kubecontainer.Status{{ID: infraContainer.ID, State: infraContainer.State}},
+		ContainerStatuses: []*kubecontainer.ContainerStatus{{ID: infraContainer.ID, State: infraContainer.State}},
 	}
 	runtimeMock.On("GetPodStatus", podID, "", "").Return(goodStatus, nil).Once()
 
@@ -483,7 +482,7 @@ func TestRelistWithReinspection(t *testing.T) {
 
 	badStatus := &kubecontainer.PodStatus{
 		ID:                podID,
-		ContainerStatuses: []*kubecontainer.Status{},
+		ContainerStatuses: []*kubecontainer.ContainerStatus{},
 	}
 	runtimeMock.On("GetPodStatus", podID, "", "").Return(badStatus, errors.New("inspection error")).Once()
 
@@ -608,7 +607,7 @@ func TestRelistIPChange(t *testing.T) {
 		status := &kubecontainer.PodStatus{
 			ID:                id,
 			IPs:               tc.podIPs,
-			ContainerStatuses: []*kubecontainer.Status{{ID: container.ID, State: cState}},
+			ContainerStatuses: []*kubecontainer.ContainerStatus{{ID: container.ID, State: cState}},
 		}
 		event := &PodLifecycleEvent{ID: pod.ID, Type: ContainerStarted, Data: container.ID.ID}
 
@@ -630,7 +629,7 @@ func TestRelistIPChange(t *testing.T) {
 		}
 		status = &kubecontainer.PodStatus{
 			ID:                id,
-			ContainerStatuses: []*kubecontainer.Status{{ID: container.ID, State: kubecontainer.ContainerStateExited}},
+			ContainerStatuses: []*kubecontainer.ContainerStatus{{ID: container.ID, State: kubecontainer.ContainerStateExited}},
 		}
 		event = &PodLifecycleEvent{ID: pod.ID, Type: ContainerDied, Data: container.ID.ID}
 		runtimeMock.On("GetPods", true).Return([]*kubecontainer.Pod{pod}, nil).Once()
@@ -682,22 +681,22 @@ func TestRunningPodAndContainerCount(t *testing.T) {
 	}{
 		{
 			name:        "test container count",
-			metricsName: "kubelet_running_containers",
+			metricsName: "kubelet_running_container_count",
 			wants: `
-# HELP kubelet_running_containers [ALPHA] Number of containers currently running
-# TYPE kubelet_running_containers gauge
-kubelet_running_containers{container_state="exited"} 1
-kubelet_running_containers{container_state="running"} 1
-kubelet_running_containers{container_state="unknown"} 2
+# HELP kubelet_running_container_count [ALPHA] Number of containers currently running
+# TYPE kubelet_running_container_count gauge
+kubelet_running_container_count{container_state="exited"} 1
+kubelet_running_container_count{container_state="running"} 1
+kubelet_running_container_count{container_state="unknown"} 2
 `,
 		},
 		{
 			name:        "test pod count",
-			metricsName: "kubelet_running_pods",
+			metricsName: "kubelet_running_pod_count",
 			wants: `
-# HELP kubelet_running_pods [ALPHA] Number of pods currently running
-# TYPE kubelet_running_pods gauge
-kubelet_running_pods 2
+# HELP kubelet_running_pod_count [ALPHA] Number of pods currently running
+# TYPE kubelet_running_pod_count gauge
+kubelet_running_pod_count 2
 `,
 		},
 	}

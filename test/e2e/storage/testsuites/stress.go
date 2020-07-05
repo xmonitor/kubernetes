@@ -43,7 +43,8 @@ type stressTest struct {
 	config        *PerTestConfig
 	driverCleanup func()
 
-	migrationCheck *migrationOpCheck
+	intreeOps   opCounts
+	migratedOps opCounts
 
 	resources []*VolumeResource
 	pods      []*v1.Pod
@@ -109,7 +110,7 @@ func (t *stressTestSuite) DefineTests(driver TestDriver, pattern testpatterns.Te
 
 		// Now do the more expensive test initialization.
 		l.config, l.driverCleanup = driver.PrepareTest(f)
-		l.migrationCheck = newMigrationOpCheck(f.ClientSet, dInfo.InTreePluginName)
+		l.intreeOps, l.migratedOps = getMigrationVolumeOpCounts(f.ClientSet, dInfo.InTreePluginName)
 		l.resources = []*VolumeResource{}
 		l.pods = []*v1.Pod{}
 		l.stopChs = []chan struct{}{}
@@ -139,7 +140,7 @@ func (t *stressTestSuite) DefineTests(driver TestDriver, pattern testpatterns.Te
 
 		errs = append(errs, tryFunc(l.driverCleanup))
 		framework.ExpectNoError(errors.NewAggregate(errs), "while cleaning up resource")
-		l.migrationCheck.validateMigrationVolumeOpCounts()
+		validateMigrationVolumeOpCounts(f.ClientSet, dInfo.InTreePluginName, l.intreeOps, l.migratedOps)
 	}
 
 	ginkgo.It("multiple pods should access different volumes repeatedly [Slow] [Serial]", func() {

@@ -8,7 +8,6 @@ reviewers:
 approvers:
   - alejandrox1
   - andrewsykim
-  - BenTheElder
   - bowei # for test/e2e/{dns*,network}.go
   - cblecker
   - MrHohn
@@ -18,7 +17,6 @@ approvers:
   - liggitt
   - mikedanese
   - msau42
-  - neolit123
   - oomichi
   - pwittrock # for test/e2e/kubectl.go
   - saad-ali

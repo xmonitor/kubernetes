@@ -35,6 +35,7 @@ filters:
     - ncdc
     - tallclair
     - yifan-gu
+    - eparis
     - mwielgus
     - feiskyer
     - soltysh

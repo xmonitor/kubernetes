@@ -286,7 +286,7 @@ type realIPGetter struct {
 // 172.17.0.1 dev docker0  scope host  src 172.17.0.1
 // 192.168.122.1 dev virbr0  scope host  src 192.168.122.1
 // Then filter out dev==kube-ipvs0, and cut the unique src IP fields,
-// Node IP set: [100.106.89.164, 127.0.0.1, 172.17.0.1, 192.168.122.1]
+// Node IP set: [100.106.89.164, 127.0.0.1, 192.168.122.1]
 func (r *realIPGetter) NodeIPs() (ips []net.IP, err error) {
 	// Pass in empty filter device name for list all LOCAL type addresses.
 	nodeAddress, err := r.nl.GetLocalAddresses("", DefaultDummyDevice)
@@ -418,7 +418,7 @@ func NewProxier(ipt utiliptables.Interface,
 
 	// Generate the masquerade mark to use for SNAT rules.
 	masqueradeValue := 1 << uint(masqueradeBit)
-	masqueradeMark := fmt.Sprintf("%#08x", masqueradeValue)
+	masqueradeMark := fmt.Sprintf("%#08x/%#08x", masqueradeValue, masqueradeValue)
 
 	isIPv6 := utilnet.IsIPv6(nodeIP)
 
@@ -433,17 +433,12 @@ func NewProxier(ipt utiliptables.Interface,
 
 	endpointSlicesEnabled := utilfeature.DefaultFeatureGate.Enabled(features.EndpointSliceProxying)
 
-	var incorrectAddresses []string
-	nodePortAddresses, incorrectAddresses = utilproxy.FilterIncorrectCIDRVersion(nodePortAddresses, isIPv6)
-	if len(incorrectAddresses) > 0 {
-		klog.Warning("NodePortAddresses of wrong family; ", incorrectAddresses)
-	}
 	proxier := &Proxier{
 		portsMap:              make(map[utilproxy.LocalPort]utilproxy.Closeable),
 		serviceMap:            make(proxy.ServiceMap),
-		serviceChanges:        proxy.NewServiceChangeTracker(newServiceInfo, &isIPv6, recorder, nil),
+		serviceChanges:        proxy.NewServiceChangeTracker(newServiceInfo, &isIPv6, recorder),
 		endpointsMap:          make(proxy.EndpointsMap),
-		endpointsChanges:      proxy.NewEndpointChangeTracker(hostname, nil, &isIPv6, recorder, endpointSlicesEnabled, nil),
+		endpointsChanges:      proxy.NewEndpointChangeTracker(hostname, nil, &isIPv6, recorder, endpointSlicesEnabled),
 		syncPeriod:            syncPeriod,
 		minSyncPeriod:         minSyncPeriod,
 		excludeCIDRs:          parseExcludedCIDRs(excludeCIDRs),
@@ -514,14 +509,12 @@ func NewDualStackProxier(
 
 	safeIpset := newSafeIpset(ipset)
 
-	nodePortAddresses4, nodePortAddresses6 := utilproxy.FilterIncorrectCIDRVersion(nodePortAddresses, false)
-
 	// Create an ipv4 instance of the single-stack proxier
 	ipv4Proxier, err := NewProxier(ipt[0], ipvs, safeIpset, sysctl,
 		exec, syncPeriod, minSyncPeriod, filterCIDRs(false, excludeCIDRs), strictARP,
 		tcpTimeout, tcpFinTimeout, udpTimeout, masqueradeAll, masqueradeBit,
 		localDetectors[0], hostname, nodeIP[0],
-		recorder, healthzServer, scheduler, nodePortAddresses4, kernelHandler)
+		recorder, healthzServer, scheduler, nodePortAddresses, kernelHandler)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create ipv4 proxier: %v", err)
 	}
@@ -530,7 +523,7 @@ func NewDualStackProxier(
 		exec, syncPeriod, minSyncPeriod, filterCIDRs(true, excludeCIDRs), strictARP,
 		tcpTimeout, tcpFinTimeout, udpTimeout, masqueradeAll, masqueradeBit,
 		localDetectors[1], hostname, nodeIP[1],
-		nil, nil, scheduler, nodePortAddresses6, kernelHandler)
+		nil, nil, scheduler, nodePortAddresses, kernelHandler)
 	if err != nil {
 		return nil, fmt.Errorf("unable to create ipv6 proxier: %v", err)
 	}
@@ -1765,7 +1758,7 @@ func (proxier *Proxier) writeIptablesRules() {
 	writeLine(proxier.filterRules,
 		"-A", string(KubeForwardChain),
 		"-m", "comment", "--comment", `"kubernetes forwarding rules"`,
-		"-m", "mark", "--mark", fmt.Sprintf("%s/%s", proxier.masqueradeMark, proxier.masqueradeMark),
+		"-m", "mark", "--mark", proxier.masqueradeMark,
 		"-j", "ACCEPT",
 	)
 
@@ -1786,39 +1779,6 @@ func (proxier *Proxier) writeIptablesRules() {
 		"--ctstate", "RELATED,ESTABLISHED",
 		"-j", "ACCEPT",
 	)
-
-	// Install the kubernetes-specific postrouting rules. We use a whole chain for
-	// this so that it is easier to flush and change, for example if the mark
-	// value should ever change.
-	// NB: THIS MUST MATCH the corresponding code in the kubelet
-	writeLine(proxier.natRules, []string{
-		"-A", string(kubePostroutingChain),
-		"-m", "mark", "!", "--mark", fmt.Sprintf("%s/%s", proxier.masqueradeMark, proxier.masqueradeMark),
-		"-j", "RETURN",
-	}...)
-	// Clear the mark to avoid re-masquerading if the packet re-traverses the network stack.
-	writeLine(proxier.natRules, []string{
-		"-A", string(kubePostroutingChain),
-		// XOR proxier.masqueradeMark to unset it
-		"-j", "MARK", "--xor-mark", proxier.masqueradeMark,
-	}...)
-	masqRule := []string{
-		"-A", string(kubePostroutingChain),
-		"-m", "comment", "--comment", `"kubernetes service traffic requiring SNAT"`,
-		"-j", "MASQUERADE",
-	}
-	if proxier.iptables.HasRandomFully() {
-		masqRule = append(masqRule, "--random-fully")
-	}
-	writeLine(proxier.natRules, masqRule...)
-
-	// Install the kubernetes-specific masquerade mark rule. We use a whole chain for
-	// this so that it is easier to flush and change, for example if the mark
-	// value should ever change.
-	writeLine(proxier.natRules, []string{
-		"-A", string(KubeMarkMasqChain),
-		"-j", "MARK", "--or-mark", proxier.masqueradeMark,
-	}...)
 
 	// Write the end-of-table markers.
 	writeLine(proxier.filterRules, "COMMIT")
@@ -1878,6 +1838,28 @@ func (proxier *Proxier) createAndLinkeKubeChain() {
 		}
 	}
 
+	// Install the kubernetes-specific postrouting rules. We use a whole chain for
+	// this so that it is easier to flush and change, for example if the mark
+	// value should ever change.
+	// NB: THIS MUST MATCH the corresponding code in the kubelet
+	masqRule := []string{
+		"-A", string(kubePostroutingChain),
+		"-m", "comment", "--comment", `"kubernetes service traffic requiring SNAT"`,
+		"-m", "mark", "--mark", proxier.masqueradeMark,
+		"-j", "MASQUERADE",
+	}
+	if proxier.iptables.HasRandomFully() {
+		masqRule = append(masqRule, "--random-fully")
+	}
+	writeLine(proxier.natRules, masqRule...)
+
+	// Install the kubernetes-specific masquerade mark rule. We use a whole chain for
+	// this so that it is easier to flush and change, for example if the mark
+	// value should ever change.
+	writeLine(proxier.natRules, []string{
+		"-A", string(KubeMarkMasqChain),
+		"-j", "MARK", "--set-xmark", proxier.masqueradeMark,
+	}...)
 }
 
 // getExistingChains get iptables-save output so we can check for existing chains and rules.

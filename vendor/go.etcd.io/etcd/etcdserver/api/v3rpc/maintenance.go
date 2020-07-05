@@ -18,9 +18,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"io"
-	"time"
 
-	"github.com/dustin/go-humanize"
 	"go.etcd.io/etcd/auth"
 	"go.etcd.io/etcd/etcdserver"
 	"go.etcd.io/etcd/etcdserver/api/v3rpc/rpctypes"
@@ -100,9 +98,6 @@ func (ms *maintenanceServer) Defragment(ctx context.Context, sr *pb.DefragmentRe
 	return &pb.DefragmentResponse{}, nil
 }
 
-// big enough size to hold >1 OS pages in the buffer
-const snapshotSendBufferSize = 32 * 1024
-
 func (ms *maintenanceServer) Snapshot(sr *pb.SnapshotRequest, srv pb.Maintenance_SnapshotServer) error {
 	snap := ms.bg.Backend().Snapshot()
 	pr, pw := io.Pipe()
@@ -121,46 +116,19 @@ func (ms *maintenanceServer) Snapshot(sr *pb.SnapshotRequest, srv pb.Maintenance
 		pw.Close()
 	}()
 
-	// record SHA digest of snapshot data
-	// used for integrity checks during snapshot restore operation
+	// send file data
 	h := sha256.New()
-
-	// buffer just holds read bytes from stream
-	// response size is multiple of OS page size, fetched in boltdb
-	// e.g. 4*1024
-	buf := make([]byte, snapshotSendBufferSize)
-
-	sent := int64(0)
-	total := snap.Size()
-	size := humanize.Bytes(uint64(total))
-
-	start := time.Now()
-	if ms.lg != nil {
-		ms.lg.Info("sending database snapshot to client",
-			zap.Int64("total-bytes", total),
-			zap.String("size", size),
-		)
-	} else {
-		plog.Infof("sending database snapshot to client %s [%d bytes]", size, total)
-	}
-	for total-sent > 0 {
+	br := int64(0)
+	buf := make([]byte, 32*1024)
+	sz := snap.Size()
+	for br < sz {
 		n, err := io.ReadFull(pr, buf)
 		if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
 			return togRPCError(err)
 		}
-		sent += int64(n)
-
-		// if total is x * snapshotSendBufferSize. it is possible that
-		// resp.RemainingBytes == 0
-		// resp.Blob == zero byte but not nil
-		// does this make server response sent to client nil in proto
-		// and client stops receiving from snapshot stream before
-		// server sends snapshot SHA?
-		// No, the client will still receive non-nil response
-		// until server closes the stream with EOF
-
+		br += int64(n)
 		resp := &pb.SnapshotResponse{
-			RemainingBytes: uint64(total - sent),
+			RemainingBytes: uint64(sz - br),
 			Blob:           buf[:n],
 		}
 		if err = srv.Send(resp); err != nil {
@@ -169,32 +137,11 @@ func (ms *maintenanceServer) Snapshot(sr *pb.SnapshotRequest, srv pb.Maintenance
 		h.Write(buf[:n])
 	}
 
-	// send SHA digest for integrity checks
-	// during snapshot restore operation
+	// send sha
 	sha := h.Sum(nil)
-
-	if ms.lg != nil {
-		ms.lg.Info("sending database sha256 checksum to client",
-			zap.Int64("total-bytes", total),
-			zap.Int("checksum-size", len(sha)),
-		)
-	} else {
-		plog.Infof("sending database sha256 checksum to client [%d bytes]", len(sha))
-	}
-
 	hresp := &pb.SnapshotResponse{RemainingBytes: 0, Blob: sha}
 	if err := srv.Send(hresp); err != nil {
 		return togRPCError(err)
-	}
-
-	if ms.lg != nil {
-		ms.lg.Info("successfully sent database snapshot to client",
-			zap.Int64("total-bytes", total),
-			zap.String("size", size),
-			zap.String("took", humanize.Time(start)),
-		)
-	} else {
-		plog.Infof("successfully sent database snapshot to client %s [%d bytes]", size, total)
 	}
 
 	return nil

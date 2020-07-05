@@ -122,7 +122,8 @@ type KubeletConfiguration struct {
 	TLSMinVersion string
 	// rotateCertificates enables client certificate rotation. The Kubelet will request a
 	// new certificate from the certificates.k8s.io API. This requires an approver to approve the
-	// certificate signing requests.
+	// certificate signing requests. The RotateKubeletClientCertificate feature
+	// must be enabled.
 	RotateCertificates bool
 	// serverTLSBootstrap enables server certificate bootstrap. Instead of self
 	// signing a serving certificate, the Kubelet will request a certificate from
@@ -321,9 +322,6 @@ type KubeletConfiguration struct {
 	// These sysctls are namespaced but not allowed by default.  For example: "kernel.msg*,net.ipv4.route.min_pmtu"
 	// +optional
 	AllowedUnsafeSysctls []string
-	// kernelMemcgNotification if enabled, the kubelet will integrate with the kernel memcg
-	// notification to determine if memory eviction thresholds are crossed rather than polling.
-	KernelMemcgNotification bool
 
 	/* the following fields are meant for Node Allocatable */
 

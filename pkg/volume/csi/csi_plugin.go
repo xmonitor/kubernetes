@@ -59,10 +59,9 @@ const (
 )
 
 type csiPlugin struct {
-	host                   volume.VolumeHost
-	blockEnabled           bool
-	csiDriverLister        storagelisters.CSIDriverLister
-	volumeAttachmentLister storagelisters.VolumeAttachmentLister
+	host            volume.VolumeHost
+	blockEnabled    bool
+	csiDriverLister storagelisters.CSIDriverLister
 }
 
 // ProbeVolumePlugins returns implemented plugins
@@ -187,16 +186,12 @@ func (p *csiPlugin) Init(host volume.VolumeHost) error {
 	if csiClient == nil {
 		klog.Warning(log("kubeclient not set, assuming standalone kubelet"))
 	} else {
-		// set CSIDriverLister and volumeAttachmentLister
+		// set CSIDriverLister
 		adcHost, ok := host.(volume.AttachDetachVolumeHost)
 		if ok {
 			p.csiDriverLister = adcHost.CSIDriverLister()
 			if p.csiDriverLister == nil {
 				klog.Error(log("CSIDriverLister not found on AttachDetachVolumeHost"))
-			}
-			p.volumeAttachmentLister = adcHost.VolumeAttachmentLister()
-			if p.volumeAttachmentLister == nil {
-				klog.Error(log("VolumeAttachmentLister not found on AttachDetachVolumeHost"))
 			}
 		}
 		kletHost, ok := host.(volume.KubeletVolumeHost)
@@ -205,8 +200,6 @@ func (p *csiPlugin) Init(host volume.VolumeHost) error {
 			if p.csiDriverLister == nil {
 				klog.Error(log("CSIDriverLister not found on KubeletVolumeHost"))
 			}
-			// We don't run the volumeAttachmentLister in the kubelet context
-			p.volumeAttachmentLister = nil
 		}
 	}
 
@@ -225,9 +218,6 @@ func (p *csiPlugin) Init(host volume.VolumeHost) error {
 		},
 		csitranslationplugins.AzureFileInTreePluginName: func() bool {
 			return utilfeature.DefaultFeatureGate.Enabled(features.CSIMigration) && utilfeature.DefaultFeatureGate.Enabled(features.CSIMigrationAzureFile)
-		},
-		csitranslationplugins.VSphereInTreePluginName: func() bool {
-			return utilfeature.DefaultFeatureGate.Enabled(features.CSIMigration) && utilfeature.DefaultFeatureGate.Enabled(features.CSIMigrationvSphere)
 		},
 	}
 

@@ -62,8 +62,6 @@ func newTestPlugin(t *testing.T, client *fakeclient.Clientset) (*csiPlugin, stri
 	factory := informers.NewSharedInformerFactory(client, CsiResyncPeriod)
 	csiDriverInformer := factory.Storage().V1().CSIDrivers()
 	csiDriverLister := csiDriverInformer.Lister()
-	volumeAttachmentInformer := factory.Storage().V1().VolumeAttachments()
-	volumeAttachmentLister := volumeAttachmentInformer.Lister()
 	go factory.Start(wait.NeverStop)
 
 	host := volumetest.NewFakeVolumeHostWithCSINodeName(t,
@@ -72,7 +70,6 @@ func newTestPlugin(t *testing.T, client *fakeclient.Clientset) (*csiPlugin, stri
 		ProbeVolumePlugins(),
 		"fakeNode",
 		csiDriverLister,
-		volumeAttachmentLister,
 	)
 
 	pluginMgr := host.GetPluginMgr()
@@ -91,9 +88,6 @@ func newTestPlugin(t *testing.T, client *fakeclient.Clientset) (*csiPlugin, stri
 		return csiDriverInformer.Informer().HasSynced(), nil
 	})
 
-	wait.PollImmediate(TestInformerSyncPeriod, TestInformerSyncTimeout, func() (bool, error) {
-		return volumeAttachmentInformer.Informer().HasSynced(), nil
-	})
 	return csiPlug, tmpDir
 }
 
@@ -1024,7 +1018,6 @@ func TestPluginFindAttachablePlugin(t *testing.T) {
 				ProbeVolumePlugins(),
 				"fakeNode",
 				factory.Storage().V1().CSIDrivers().Lister(),
-				factory.Storage().V1().VolumeAttachments().Lister(),
 			)
 
 			plugMgr := host.GetPluginMgr()
@@ -1144,7 +1137,7 @@ func TestPluginFindDeviceMountablePluginBySpec(t *testing.T) {
 					Spec: v1.NodeSpec{},
 				},
 			)
-			host := volumetest.NewFakeVolumeHostWithCSINodeName(t, tmpDir, client, ProbeVolumePlugins(), "fakeNode", nil, nil)
+			host := volumetest.NewFakeVolumeHostWithCSINodeName(t, tmpDir, client, ProbeVolumePlugins(), "fakeNode", nil)
 			plugMgr := host.GetPluginMgr()
 			plug, err := plugMgr.FindDeviceMountablePluginBySpec(test.spec)
 			if err != nil && !test.shouldFail {

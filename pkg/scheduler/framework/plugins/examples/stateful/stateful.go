@@ -31,8 +31,9 @@ import (
 // This plugin is stateful. It receives arguments at initialization (NewMultipointPlugin)
 // and changes its state when it is executed.
 type MultipointExample struct {
-	executionPoints []string
-	mu              sync.RWMutex
+	mpState map[int]string
+	numRuns int
+	mu      sync.RWMutex
 }
 
 var _ framework.ReservePlugin = &MultipointExample{}
@@ -46,35 +47,19 @@ func (mp *MultipointExample) Name() string {
 	return Name
 }
 
-// Reserve is the function invoked by the framework at "reserve" extension
-// point. In this trivial example, the Reserve method allocates an array of
-// strings.
+// Reserve is the functions invoked by the framework at "reserve" extension point.
 func (mp *MultipointExample) Reserve(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) *framework.Status {
 	// Reserve is not called concurrently, and so we don't need to lock.
-	mp.executionPoints = append(mp.executionPoints, "reserve")
+	mp.numRuns++
 	return nil
 }
 
-// Unreserve is the function invoked by the framework when any error happens
-// during "reserve" extension point or later. In this example, the Unreserve
-// method loses its reference to the string slice, allowing it to be garbage
-// collected, and thereby "unallocating" the reserved resources.
-func (mp *MultipointExample) Unreserve(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) {
-	// Unlike Reserve, the Unreserve method may be called concurrently since
-	// there is no guarantee that there will only one unreserve operation at any
-	// given point in time (for example, during the binding cycle).
-	mp.mu.Lock()
-	defer mp.mu.Unlock()
-	mp.executionPoints = nil
-}
-
-// PreBind is the function invoked by the framework at "prebind" extension
-// point.
+// PreBind is the functions invoked by the framework at "prebind" extension point.
 func (mp *MultipointExample) PreBind(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodeName string) *framework.Status {
 	// PreBind could be called concurrently for different pods.
 	mp.mu.Lock()
 	defer mp.mu.Unlock()
-	mp.executionPoints = append(mp.executionPoints, "pre-bind")
+	mp.numRuns++
 	if pod == nil {
 		return framework.NewStatus(framework.Error, "pod must not be nil")
 	}
@@ -87,6 +72,8 @@ func New(config *runtime.Unknown, _ framework.FrameworkHandle) (framework.Plugin
 		klog.Error("MultipointExample configuration cannot be empty")
 		return nil, fmt.Errorf("MultipointExample configuration cannot be empty")
 	}
-	mp := MultipointExample{}
+	mp := MultipointExample{
+		mpState: make(map[int]string),
+	}
 	return &mp, nil
 }

@@ -8,7 +8,6 @@ load(
 go_library(
     name = "go_default_library",
     srcs = [
-        "conntrack.go",
         "dns.go",
         "dns_common.go",
         "dns_configmap.go",

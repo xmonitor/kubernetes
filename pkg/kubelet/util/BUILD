@@ -9,31 +9,34 @@ load(
 go_test(
     name = "go_default_test",
     srcs = [
-        "util_test.go",
         "util_unix_test.go",
         "util_windows_test.go",
     ],
     embed = [":go_default_library"],
-    deps = [
-        "//vendor/github.com/stretchr/testify/assert:go_default_library",
-    ] + select({
+    deps = select({
         "@io_bazel_rules_go//go/platform:android": [
+            "//vendor/github.com/stretchr/testify/assert:go_default_library",
             "//vendor/github.com/stretchr/testify/require:go_default_library",
         ],
         "@io_bazel_rules_go//go/platform:darwin": [
+            "//vendor/github.com/stretchr/testify/assert:go_default_library",
             "//vendor/github.com/stretchr/testify/require:go_default_library",
         ],
         "@io_bazel_rules_go//go/platform:freebsd": [
+            "//vendor/github.com/stretchr/testify/assert:go_default_library",
             "//vendor/github.com/stretchr/testify/require:go_default_library",
         ],
         "@io_bazel_rules_go//go/platform:ios": [
+            "//vendor/github.com/stretchr/testify/assert:go_default_library",
             "//vendor/github.com/stretchr/testify/require:go_default_library",
         ],
         "@io_bazel_rules_go//go/platform:linux": [
+            "//vendor/github.com/stretchr/testify/assert:go_default_library",
             "//vendor/github.com/stretchr/testify/require:go_default_library",
         ],
         "@io_bazel_rules_go//go/platform:windows": [
             "//vendor/github.com/Microsoft/go-winio:go_default_library",
+            "//vendor/github.com/stretchr/testify/assert:go_default_library",
             "//vendor/github.com/stretchr/testify/require:go_default_library",
         ],
         "//conditions:default": [],

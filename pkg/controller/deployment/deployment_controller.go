@@ -100,7 +100,7 @@ type DeploymentController struct {
 // NewDeploymentController creates a new DeploymentController.
 func NewDeploymentController(dInformer appsinformers.DeploymentInformer, rsInformer appsinformers.ReplicaSetInformer, podInformer coreinformers.PodInformer, client clientset.Interface) (*DeploymentController, error) {
 	eventBroadcaster := record.NewBroadcaster()
-	eventBroadcaster.StartStructuredLogging(0)
+	eventBroadcaster.StartLogging(klog.Infof)
 	eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: client.CoreV1().Events("")})
 
 	if client != nil && client.CoreV1().RESTClient().GetRateLimiter() != nil {
@@ -481,13 +481,8 @@ func (dc *DeploymentController) handleErr(err error, key interface{}) {
 		return
 	}
 
-	ns, name, keyErr := cache.SplitMetaNamespaceKey(key.(string))
-	if keyErr != nil {
-		klog.ErrorS(err, "Failed to split meta namespace cache key", "key", key)
-	}
-
 	if dc.queue.NumRequeues(key) < maxRetries {
-		klog.V(2).InfoS("Error syncing deployment", "deployment", klog.KRef(ns, name), "err", err)
+		klog.V(2).Infof("Error syncing deployment %v: %v", key, err)
 		dc.queue.AddRateLimited(key)
 		return
 	}

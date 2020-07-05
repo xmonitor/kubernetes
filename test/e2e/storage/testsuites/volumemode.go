@@ -89,7 +89,8 @@ func (t *volumeModeTestSuite) DefineTests(driver TestDriver, pattern testpattern
 		// VolumeResource contains pv, pvc, sc, etc., owns cleaning that up
 		VolumeResource
 
-		migrationCheck *migrationOpCheck
+		intreeOps   opCounts
+		migratedOps opCounts
 	}
 	var (
 		dInfo = driver.GetDriverInfo()
@@ -111,7 +112,7 @@ func (t *volumeModeTestSuite) DefineTests(driver TestDriver, pattern testpattern
 
 		// Now do the more expensive test initialization.
 		l.config, l.driverCleanup = driver.PrepareTest(f)
-		l.migrationCheck = newMigrationOpCheck(f.ClientSet, dInfo.InTreePluginName)
+		l.intreeOps, l.migratedOps = getMigrationVolumeOpCounts(f.ClientSet, dInfo.InTreePluginName)
 	}
 
 	// manualInit initializes l.VolumeResource without creating the PV & PVC objects.
@@ -182,7 +183,7 @@ func (t *volumeModeTestSuite) DefineTests(driver TestDriver, pattern testpattern
 		errs = append(errs, tryFunc(l.driverCleanup))
 		l.driverCleanup = nil
 		framework.ExpectNoError(errors.NewAggregate(errs), "while cleaning up resource")
-		l.migrationCheck.validateMigrationVolumeOpCounts()
+		validateMigrationVolumeOpCounts(f.ClientSet, dInfo.InTreePluginName, l.intreeOps, l.migratedOps)
 	}
 
 	// We register different tests depending on the drive

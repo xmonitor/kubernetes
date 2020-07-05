@@ -54,7 +54,16 @@ var (
 			Name:           "schedule_attempts_total",
 			Help:           "Number of attempts to schedule pods, by the result. 'unschedulable' means a pod could not be scheduled, while 'error' means an internal scheduler problem.",
 			StabilityLevel: metrics.ALPHA,
-		}, []string{"result", "profile"})
+		}, []string{"result"})
+	// PodScheduleSuccesses counts how many pods were scheduled.
+	// This metric will be initialized again in Register() to assure the metric is not no-op metric.
+	PodScheduleSuccesses = scheduleAttempts.With(metrics.Labels{"result": "scheduled"})
+	// PodScheduleFailures counts how many pods could not be scheduled.
+	// This metric will be initialized again in Register() to assure the metric is not no-op metric.
+	PodScheduleFailures = scheduleAttempts.With(metrics.Labels{"result": "unschedulable"})
+	// PodScheduleErrors counts how many pods could not be scheduled due to a scheduler error.
+	// This metric will be initialized again in Register() to assure the metric is not no-op metric.
+	PodScheduleErrors            = scheduleAttempts.With(metrics.Labels{"result": "error"})
 	DeprecatedSchedulingDuration = metrics.NewSummaryVec(
 		&metrics.SummaryOpts{
 			Subsystem: SchedulerSubsystem,
@@ -68,14 +77,15 @@ var (
 		},
 		[]string{OperationLabel},
 	)
-	e2eSchedulingLatency = metrics.NewHistogramVec(
+	E2eSchedulingLatency = metrics.NewHistogram(
 		&metrics.HistogramOpts{
 			Subsystem:      SchedulerSubsystem,
 			Name:           "e2e_scheduling_duration_seconds",
 			Help:           "E2e scheduling latency in seconds (scheduling algorithm + binding)",
 			Buckets:        metrics.ExponentialBuckets(0.001, 2, 15),
 			StabilityLevel: metrics.ALPHA,
-		}, []string{"result", "profile"})
+		},
+	)
 	SchedulingAlgorithmLatency = metrics.NewHistogram(
 		&metrics.HistogramOpts{
 			Subsystem:      SchedulerSubsystem,
@@ -182,7 +192,7 @@ var (
 			Buckets:        metrics.ExponentialBuckets(0.0001, 2, 12),
 			StabilityLevel: metrics.ALPHA,
 		},
-		[]string{"extension_point", "status", "profile"})
+		[]string{"extension_point", "status"})
 
 	PluginExecutionDuration = metrics.NewHistogramVec(
 		&metrics.HistogramOpts{
@@ -225,7 +235,7 @@ var (
 	metricsList = []metrics.Registerable{
 		scheduleAttempts,
 		DeprecatedSchedulingDuration,
-		e2eSchedulingLatency,
+		E2eSchedulingLatency,
 		SchedulingAlgorithmLatency,
 		BindingLatency,
 		DeprecatedSchedulingAlgorithmPredicateEvaluationSecondsDuration,
@@ -253,6 +263,9 @@ func Register() {
 	registerMetrics.Do(func() {
 		RegisterMetrics(metricsList...)
 		volumeschedulingmetrics.RegisterVolumeSchedulingMetrics()
+		PodScheduleSuccesses = scheduleAttempts.With(metrics.Labels{"result": "scheduled"})
+		PodScheduleFailures = scheduleAttempts.With(metrics.Labels{"result": "unschedulable"})
+		PodScheduleErrors = scheduleAttempts.With(metrics.Labels{"result": "error"})
 	})
 }
 

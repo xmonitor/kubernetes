@@ -1800,7 +1800,7 @@ func TestCSIDriverValidation(t *testing.T) {
 			},
 		},
 		{
-			// PodInfoOnMount not set
+			// AttachRequired not set
 			ObjectMeta: metav1.ObjectMeta{Name: driverName},
 			Spec: storage.CSIDriverSpec{
 				AttachRequired: &attachNotRequired,
@@ -1856,86 +1856,64 @@ func TestCSIDriverValidationUpdate(t *testing.T) {
 		}
 	}
 
-	// Each test case changes exactly one field. None of that is valid.
-	errorCases := []struct {
-		name   string
-		modify func(new *storage.CSIDriver)
-	}{
+	errorCases := []storage.CSIDriver{
 		{
-			name: "invalid name",
-			modify: func(new *storage.CSIDriver) {
-				new.Name = invalidName
+			ObjectMeta: metav1.ObjectMeta{Name: invalidName},
+			Spec: storage.CSIDriverSpec{
+				AttachRequired: &attachRequired,
+				PodInfoOnMount: &podInfoOnMount,
 			},
 		},
 		{
-			name: "long name",
-			modify: func(new *storage.CSIDriver) {
-				new.Name = longName
+			ObjectMeta: metav1.ObjectMeta{Name: longName},
+			Spec: storage.CSIDriverSpec{
+				AttachRequired: &attachNotRequired,
+				PodInfoOnMount: &notPodInfoOnMount,
 			},
 		},
 		{
-			name: "AttachRequired not set",
-			modify: func(new *storage.CSIDriver) {
-				new.Spec.AttachRequired = nil
+			// AttachRequired not set
+			ObjectMeta: metav1.ObjectMeta{Name: driverName},
+			Spec: storage.CSIDriverSpec{
+				AttachRequired: nil,
+				PodInfoOnMount: &podInfoOnMount,
 			},
 		},
 		{
-			name: "PodInfoOnMount not set",
-			modify: func(new *storage.CSIDriver) {
-				new.Spec.PodInfoOnMount = nil
+			// AttachRequired not set
+			ObjectMeta: metav1.ObjectMeta{Name: driverName},
+			Spec: storage.CSIDriverSpec{
+				AttachRequired: &attachNotRequired,
+				PodInfoOnMount: nil,
 			},
 		},
 		{
-			name: "AttachRequired changed",
-			modify: func(new *storage.CSIDriver) {
-				new.Spec.AttachRequired = &attachRequired
-			},
-		},
-		{
-			name: "PodInfoOnMount changed",
-			modify: func(new *storage.CSIDriver) {
-				new.Spec.PodInfoOnMount = &podInfoOnMount
-			},
-		},
-		{
-			name: "invalid volume lifecycle mode",
-			modify: func(new *storage.CSIDriver) {
-				new.Spec.VolumeLifecycleModes = []storage.VolumeLifecycleMode{
+			// invalid mode
+			ObjectMeta: metav1.ObjectMeta{Name: driverName},
+			Spec: storage.CSIDriverSpec{
+				AttachRequired: &attachNotRequired,
+				PodInfoOnMount: &notPodInfoOnMount,
+				VolumeLifecycleModes: []storage.VolumeLifecycleMode{
 					"no-such-mode",
-				}
+				},
 			},
 		},
 		{
-			name: "volume lifecycle modes not set",
-			modify: func(new *storage.CSIDriver) {
-				new.Spec.VolumeLifecycleModes = nil
-			},
-		},
-		{
-			name: "VolumeLifecyclePersistent removed",
-			modify: func(new *storage.CSIDriver) {
-				new.Spec.VolumeLifecycleModes = []storage.VolumeLifecycleMode{
+			// different modes
+			ObjectMeta: metav1.ObjectMeta{Name: driverName},
+			Spec: storage.CSIDriverSpec{
+				AttachRequired: &attachNotRequired,
+				PodInfoOnMount: &notPodInfoOnMount,
+				VolumeLifecycleModes: []storage.VolumeLifecycleMode{
 					storage.VolumeLifecycleEphemeral,
-				}
-			},
-		},
-		{
-			name: "VolumeLifecycleEphemeral removed",
-			modify: func(new *storage.CSIDriver) {
-				new.Spec.VolumeLifecycleModes = []storage.VolumeLifecycleMode{
-					storage.VolumeLifecyclePersistent,
-				}
+				},
 			},
 		},
 	}
 
-	for _, test := range errorCases {
-		t.Run(test.name, func(t *testing.T) {
-			new := old.DeepCopy()
-			test.modify(new)
-			if errs := ValidateCSIDriverUpdate(new, &old); len(errs) == 0 {
-				t.Errorf("Expected failure for test: %v", new)
-			}
-		})
+	for _, csiDriver := range errorCases {
+		if errs := ValidateCSIDriverUpdate(&csiDriver, &old); len(errs) == 0 {
+			t.Errorf("Expected failure for test: %v", csiDriver)
+		}
 	}
 }

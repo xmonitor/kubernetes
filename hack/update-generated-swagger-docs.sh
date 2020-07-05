@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# This script generates `types_swagger_doc_generated.go` files for API group
+# Generates `types_swagger_doc_generated.go` files for API group
 # versions. That file contains functions on API structs that return
 # the comments that should be surfaced for the corresponding API type
 # in our API docs.

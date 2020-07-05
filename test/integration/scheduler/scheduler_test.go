@@ -40,7 +40,6 @@ import (
 	"k8s.io/kubernetes/pkg/scheduler"
 	kubeschedulerconfig "k8s.io/kubernetes/pkg/scheduler/apis/config"
 	"k8s.io/kubernetes/pkg/scheduler/profile"
-	st "k8s.io/kubernetes/pkg/scheduler/testing"
 	"k8s.io/kubernetes/test/integration/framework"
 	testutils "k8s.io/kubernetes/test/integration/util"
 )
@@ -107,7 +106,6 @@ func TestSchedulerCreationFromConfigMap(t *testing.T) {
 				"PreFilterPlugin": {
 					{Name: "NodeResourcesFit"},
 					{Name: "NodePorts"},
-					{Name: "VolumeBinding"},
 					{Name: "PodTopologySpread"},
 					{Name: "InterPodAffinity"},
 				},
@@ -131,7 +129,7 @@ func TestSchedulerCreationFromConfigMap(t *testing.T) {
 				"PreScorePlugin": {
 					{Name: "PodTopologySpread"},
 					{Name: "InterPodAffinity"},
-					{Name: "SelectorSpread"},
+					{Name: "DefaultPodTopologySpread"},
 					{Name: "TaintToleration"},
 				},
 				"ScorePlugin": {
@@ -142,12 +140,14 @@ func TestSchedulerCreationFromConfigMap(t *testing.T) {
 					{Name: "NodeResourcesLeastAllocated", Weight: 1},
 					{Name: "NodeAffinity", Weight: 1},
 					{Name: "NodePreferAvoidPods", Weight: 10000},
-					{Name: "SelectorSpread", Weight: 1},
+					{Name: "DefaultPodTopologySpread", Weight: 1},
 					{Name: "TaintToleration", Weight: 1},
 				},
-				"ReservePlugin": {{Name: "VolumeBinding"}},
-				"PreBindPlugin": {{Name: "VolumeBinding"}},
-				"BindPlugin":    {{Name: "DefaultBinder"}},
+				"ReservePlugin":   {{Name: "VolumeBinding"}},
+				"UnreservePlugin": {{Name: "VolumeBinding"}},
+				"PreBindPlugin":   {{Name: "VolumeBinding"}},
+				"BindPlugin":      {{Name: "DefaultBinder"}},
+				"PostBindPlugin":  {{Name: "VolumeBinding"}},
 			},
 		},
 		{
@@ -200,7 +200,6 @@ kind: Policy
 				"PreFilterPlugin": {
 					{Name: "NodeResourcesFit"},
 					{Name: "NodePorts"},
-					{Name: "VolumeBinding"},
 					{Name: "PodTopologySpread"},
 					{Name: "InterPodAffinity"},
 				},
@@ -224,7 +223,7 @@ kind: Policy
 				"PreScorePlugin": {
 					{Name: "PodTopologySpread"},
 					{Name: "InterPodAffinity"},
-					{Name: "SelectorSpread"},
+					{Name: "DefaultPodTopologySpread"},
 					{Name: "TaintToleration"},
 				},
 				"ScorePlugin": {
@@ -235,12 +234,14 @@ kind: Policy
 					{Name: "NodeResourcesLeastAllocated", Weight: 1},
 					{Name: "NodeAffinity", Weight: 1},
 					{Name: "NodePreferAvoidPods", Weight: 10000},
-					{Name: "SelectorSpread", Weight: 1},
+					{Name: "DefaultPodTopologySpread", Weight: 1},
 					{Name: "TaintToleration", Weight: 1},
 				},
-				"ReservePlugin": {{Name: "VolumeBinding"}},
-				"PreBindPlugin": {{Name: "VolumeBinding"}},
-				"BindPlugin":    {{Name: "DefaultBinder"}},
+				"ReservePlugin":   {{Name: "VolumeBinding"}},
+				"UnreservePlugin": {{Name: "VolumeBinding"}},
+				"PreBindPlugin":   {{Name: "VolumeBinding"}},
+				"BindPlugin":      {{Name: "DefaultBinder"}},
+				"PostBindPlugin":  {{Name: "VolumeBinding"}},
 			},
 		},
 		{
@@ -698,12 +699,12 @@ func TestAllocatable(t *testing.T) {
 	defer testutils.CleanupTest(t, testCtx)
 
 	// 2. create a node without allocatable awareness
-	nodeRes := map[v1.ResourceName]string{
-		v1.ResourcePods:   "32",
-		v1.ResourceCPU:    "30m",
-		v1.ResourceMemory: "30",
+	nodeRes := &v1.ResourceList{
+		v1.ResourcePods:   *resource.NewQuantity(32, resource.DecimalSI),
+		v1.ResourceCPU:    *resource.NewMilliQuantity(30, resource.DecimalSI),
+		v1.ResourceMemory: *resource.NewQuantity(30, resource.BinarySI),
 	}
-	allocNode, err := createNode(testCtx.ClientSet, st.MakeNode().Name("node-allocatable-scheduler-test-node").Capacity(nodeRes).Obj())
+	allocNode, err := createNode(testCtx.ClientSet, "node-allocatable-scheduler-test-node", nodeRes)
 	if err != nil {
 		t.Fatalf("Failed to create node: %v", err)
 	}
@@ -776,15 +777,15 @@ func TestSchedulerInformers(t *testing.T) {
 		v1.ResourceCPU:    *resource.NewMilliQuantity(200, resource.DecimalSI),
 		v1.ResourceMemory: *resource.NewQuantity(200, resource.BinarySI)},
 	}
-	defaultNodeRes := map[v1.ResourceName]string{
-		v1.ResourcePods:   "32",
-		v1.ResourceCPU:    "500m",
-		v1.ResourceMemory: "500",
+	defaultNodeRes := &v1.ResourceList{
+		v1.ResourcePods:   *resource.NewQuantity(32, resource.DecimalSI),
+		v1.ResourceCPU:    *resource.NewMilliQuantity(500, resource.DecimalSI),
+		v1.ResourceMemory: *resource.NewQuantity(500, resource.BinarySI),
 	}
 
 	type nodeConfig struct {
 		name string
-		res  map[v1.ResourceName]string
+		res  *v1.ResourceList
 	}
 
 	tests := []struct {
@@ -827,7 +828,7 @@ func TestSchedulerInformers(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			for _, nodeConf := range test.nodes {
-				_, err := createNode(cs, st.MakeNode().Name(nodeConf.name).Capacity(nodeConf.res).Obj())
+				_, err := createNode(cs, nodeConf.name, nodeConf.res)
 				if err != nil {
 					t.Fatalf("Error creating node %v: %v", nodeConf.name, err)
 				}

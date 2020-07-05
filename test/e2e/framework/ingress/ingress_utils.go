@@ -445,18 +445,10 @@ func NewIngressTestJig(c clientset.Interface) *TestJig {
 func (j *TestJig) CreateIngress(manifestPath, ns string, ingAnnotations map[string]string, svcAnnotations map[string]string) {
 	var err error
 	read := func(file string) string {
-		data, err := e2etestfiles.Read(filepath.Join(manifestPath, file))
-		if err != nil {
-			framework.Fail(err.Error())
-		}
-		return string(data)
+		return string(e2etestfiles.ReadOrDie(filepath.Join(manifestPath, file)))
 	}
 	exists := func(file string) bool {
-		found, err := e2etestfiles.Exists(filepath.Join(manifestPath, file))
-		if err != nil {
-			framework.Fail(fmt.Sprintf("fatal error looking for test file %s: %s", file, err))
-		}
-		return found
+		return e2etestfiles.Exists(filepath.Join(manifestPath, file))
 	}
 
 	j.Logger.Infof("creating replication controller")
@@ -1026,13 +1018,8 @@ func (cont *NginxIngressController) Init() {
 	framework.ExpectNoError(err)
 
 	read := func(file string) string {
-		data, err := e2etestfiles.Read(filepath.Join(IngressManifestPath, "nginx", file))
-		if err != nil {
-			framework.Fail(err.Error())
-		}
-		return string(data)
+		return string(e2etestfiles.ReadOrDie(filepath.Join(IngressManifestPath, "nginx", file)))
 	}
-
 	framework.Logf("initializing nginx ingress controller")
 	framework.RunKubectlOrDieInput(cont.Ns, read("rc.yaml"), "create", "-f", "-", fmt.Sprintf("--namespace=%v", cont.Ns))
 

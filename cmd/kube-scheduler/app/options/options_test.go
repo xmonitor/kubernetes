@@ -722,16 +722,6 @@ profiles:
 			},
 		},
 		{
-			name: "Attempting to set Component Config Profiles and Policy config",
-			options: &Options{
-				ConfigFile: pluginConfigFile,
-				Deprecated: &DeprecatedOptions{
-					PolicyConfigMapName: "bar",
-				},
-			},
-			expectedError: "cannot set a Plugin config and Policy config",
-		},
-		{
 			name: "unknown field",
 			options: &Options{
 				ConfigFile: unknownFieldConfig,

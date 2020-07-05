@@ -896,15 +896,9 @@ func TestValidateNetworkPolicyUpdate(t *testing.T) {
 }
 
 func TestValidateIngress(t *testing.T) {
-	serviceBackend := &networking.IngressServiceBackend{
-		Name: "defaultbackend",
-		Port: networking.ServiceBackendPort{
-			Name:   "",
-			Number: 80,
-		},
-	}
 	defaultBackend := networking.IngressBackend{
-		Service: serviceBackend,
+		ServiceName: "default-backend",
+		ServicePort: intstr.FromInt(80),
 	}
 	pathTypePrefix := networking.PathTypePrefix
 	pathTypeImplementationSpecific := networking.PathTypeImplementationSpecific
@@ -916,7 +910,10 @@ func TestValidateIngress(t *testing.T) {
 			Namespace: metav1.NamespaceDefault,
 		},
 		Spec: networking.IngressSpec{
-			DefaultBackend: &defaultBackend,
+			Backend: &networking.IngressBackend{
+				ServiceName: "default-backend",
+				ServicePort: intstr.FromInt(80),
+			},
 			Rules: []networking.IngressRule{
 				{
 					Host: "foo.bar.com",
@@ -964,7 +961,7 @@ func TestValidateIngress(t *testing.T) {
 		"backend (v1beta1) with no service": {
 			groupVersion: &networkingv1beta1.SchemeGroupVersion,
 			tweakIngress: func(ing *networking.Ingress) {
-				ing.Spec.DefaultBackend.Service.Name = ""
+				ing.Spec.Backend.ServiceName = ""
 			},
 			expectErrsOnFields: []string{
 				"spec.backend.serviceName",
@@ -1042,7 +1039,7 @@ func TestValidateIngress(t *testing.T) {
 								Path:     "/foo",
 								PathType: &pathTypeImplementationSpecific,
 								Backend: networking.IngressBackend{
-									Service: serviceBackend,
+									ServiceName: "default-backend",
 									Resource: &api.TypedLocalObjectReference{
 										APIGroup: utilpointer.StringPtr("example.com"),
 										Kind:     "foo",
@@ -1067,7 +1064,7 @@ func TestValidateIngress(t *testing.T) {
 								Path:     "/foo",
 								PathType: &pathTypeImplementationSpecific,
 								Backend: networking.IngressBackend{
-									Service: serviceBackend,
+									ServicePort: intstr.FromInt(80),
 									Resource: &api.TypedLocalObjectReference{
 										APIGroup: utilpointer.StringPtr("example.com"),
 										Kind:     "foo",
@@ -1086,8 +1083,8 @@ func TestValidateIngress(t *testing.T) {
 		"spec.backend resource and service name are not allowed together": {
 			groupVersion: &networkingv1beta1.SchemeGroupVersion,
 			tweakIngress: func(ing *networking.Ingress) {
-				ing.Spec.DefaultBackend = &networking.IngressBackend{
-					Service: serviceBackend,
+				ing.Spec.Backend = &networking.IngressBackend{
+					ServiceName: "default-backend",
 					Resource: &api.TypedLocalObjectReference{
 						APIGroup: utilpointer.StringPtr("example.com"),
 						Kind:     "foo",
@@ -1102,8 +1099,8 @@ func TestValidateIngress(t *testing.T) {
 		"spec.backend resource and service port are not allowed together": {
 			groupVersion: &networkingv1beta1.SchemeGroupVersion,
 			tweakIngress: func(ing *networking.Ingress) {
-				ing.Spec.DefaultBackend = &networking.IngressBackend{
-					Service: serviceBackend,
+				ing.Spec.Backend = &networking.IngressBackend{
+					ServicePort: intstr.FromInt(80),
 					Resource: &api.TypedLocalObjectReference{
 						APIGroup: utilpointer.StringPtr("example.com"),
 						Kind:     "foo",
@@ -1139,16 +1136,8 @@ func TestValidateIngress(t *testing.T) {
 }
 
 func TestValidateIngressRuleValue(t *testing.T) {
-	serviceBackend := networking.IngressServiceBackend{
-		Name: "defaultbackend",
-		Port: networking.ServiceBackendPort{
-			Name:   "",
-			Number: 80,
-		},
-	}
 	fldPath := field.NewPath("testing.http.paths[0].path")
 	testCases := map[string]struct {
-		groupVersion *schema.GroupVersion
 		pathType     networking.PathType
 		path         string
 		expectedErrs field.ErrorList
@@ -1244,17 +1233,16 @@ func TestValidateIngressRuleValue(t *testing.T) {
 							Path:     testCase.path,
 							PathType: &testCase.pathType,
 							Backend: networking.IngressBackend{
-								Service: &serviceBackend,
+								ServiceName: "default-backend",
+								ServicePort: intstr.FromInt(80),
 							},
 						},
 					},
 				},
 			}
-			gv := testCase.groupVersion
-			if gv == nil {
-				gv = &networkingv1.SchemeGroupVersion
-			}
-			errs := validateIngressRuleValue(irv, field.NewPath("testing"), IngressValidationOptions{}, *gv)
+
+			errs := validateIngressRuleValue(irv, field.NewPath("testing"), IngressValidationOptions{})
+
 			if len(errs) != len(testCase.expectedErrs) {
 				t.Fatalf("Expected %d errors, got %d (%+v)", len(testCase.expectedErrs), len(errs), errs)
 			}
@@ -1270,14 +1258,9 @@ func TestValidateIngressRuleValue(t *testing.T) {
 
 func TestValidateIngressCreate(t *testing.T) {
 	implementationPathType := networking.PathTypeImplementationSpecific
-	serviceBackend := &networking.IngressServiceBackend{
-		Name: "defaultbackend",
-		Port: networking.ServiceBackendPort{
-			Number: 80,
-		},
-	}
 	defaultBackend := networking.IngressBackend{
-		Service: serviceBackend,
+		ServiceName: "default-backend",
+		ServicePort: intstr.FromInt(80),
 	}
 	resourceBackend := &api.TypedLocalObjectReference{
 		APIGroup: utilpointer.StringPtr("example.com"),
@@ -1291,13 +1274,12 @@ func TestValidateIngressCreate(t *testing.T) {
 			ResourceVersion: "1234",
 		},
 		Spec: networking.IngressSpec{
-			DefaultBackend: &defaultBackend,
-			Rules:          []networking.IngressRule{},
+			Backend: &defaultBackend,
+			Rules:   []networking.IngressRule{},
 		},
 	}
 
 	testCases := map[string]struct {
-		groupVersion *schema.GroupVersion
 		tweakIngress func(ingress *networking.Ingress)
 		expectedErrs field.ErrorList
 	}{
@@ -1337,7 +1319,7 @@ func TestValidateIngressCreate(t *testing.T) {
 			},
 			expectedErrs: field.ErrorList{},
 		},
-		"invalid regex path allowed (v1)": {
+		"invalid regex path": {
 			tweakIngress: func(ingress *networking.Ingress) {
 				ingress.Spec.Rules = []networking.IngressRule{{
 					Host: "foo.bar.com",
@@ -1356,7 +1338,7 @@ func TestValidateIngressCreate(t *testing.T) {
 		},
 		"Spec.Backend.Resource field allowed on create": {
 			tweakIngress: func(ingress *networking.Ingress) {
-				ingress.Spec.DefaultBackend = &networking.IngressBackend{
+				ingress.Spec.Backend = &networking.IngressBackend{
 					Resource: resourceBackend}
 			},
 			expectedErrs: field.ErrorList{},
@@ -1385,11 +1367,8 @@ func TestValidateIngressCreate(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			newIngress := baseIngress.DeepCopy()
 			testCase.tweakIngress(newIngress)
-			gv := testCase.groupVersion
-			if gv == nil {
-				gv = &networkingv1.SchemeGroupVersion
-			}
-			errs := ValidateIngressCreate(newIngress, *gv)
+
+			errs := ValidateIngressCreate(newIngress, networkingv1beta1.SchemeGroupVersion)
 			if len(errs) != len(testCase.expectedErrs) {
 				t.Fatalf("Expected %d errors, got %d (%+v)", len(testCase.expectedErrs), len(errs), errs)
 			}
@@ -1405,14 +1384,9 @@ func TestValidateIngressCreate(t *testing.T) {
 
 func TestValidateIngressUpdate(t *testing.T) {
 	implementationPathType := networking.PathTypeImplementationSpecific
-	serviceBackend := &networking.IngressServiceBackend{
-		Name: "defaultbackend",
-		Port: networking.ServiceBackendPort{
-			Number: 80,
-		},
-	}
 	defaultBackend := networking.IngressBackend{
-		Service: serviceBackend,
+		ServiceName: "default-backend",
+		ServicePort: intstr.FromInt(80),
 	}
 	resourceBackend := &api.TypedLocalObjectReference{
 		APIGroup: utilpointer.StringPtr("example.com"),
@@ -1426,7 +1400,7 @@ func TestValidateIngressUpdate(t *testing.T) {
 			ResourceVersion: "1234",
 		},
 		Spec: networking.IngressSpec{
-			DefaultBackend: &defaultBackend,
+			Backend: &defaultBackend,
 		},
 	}
 
@@ -1571,26 +1545,26 @@ func TestValidateIngressUpdate(t *testing.T) {
 		},
 		"new Backend.Resource allowed on update": {
 			tweakIngresses: func(newIngress, oldIngress *networking.Ingress) {
-				oldIngress.Spec.DefaultBackend = &defaultBackend
-				newIngress.Spec.DefaultBackend = &networking.IngressBackend{
+				oldIngress.Spec.Backend = &defaultBackend
+				newIngress.Spec.Backend = &networking.IngressBackend{
 					Resource: resourceBackend}
 			},
 			expectedErrs: field.ErrorList{},
 		},
-		"old DefaultBackend.Resource allowed on update": {
+		"old Backend.Resource allowed on update": {
 			tweakIngresses: func(newIngress, oldIngress *networking.Ingress) {
-				oldIngress.Spec.DefaultBackend = &networking.IngressBackend{
+				oldIngress.Spec.Backend = &networking.IngressBackend{
 					Resource: resourceBackend}
-				newIngress.Spec.DefaultBackend = &networking.IngressBackend{
+				newIngress.Spec.Backend = &networking.IngressBackend{
 					Resource: resourceBackend}
 			},
 			expectedErrs: field.ErrorList{},
 		},
 		"changing spec.backend from resource -> no resource": {
 			tweakIngresses: func(newIngress, oldIngress *networking.Ingress) {
-				oldIngress.Spec.DefaultBackend = &networking.IngressBackend{
+				oldIngress.Spec.Backend = &networking.IngressBackend{
 					Resource: resourceBackend}
-				newIngress.Spec.DefaultBackend = &defaultBackend
+				newIngress.Spec.Backend = &defaultBackend
 			},
 			expectedErrs: field.ErrorList{},
 		},
@@ -1925,15 +1899,11 @@ func TestValidateIngressClassUpdate(t *testing.T) {
 }
 
 func TestValidateIngressTLS(t *testing.T) {
-	serviceBackend := &networking.IngressServiceBackend{
-		Name: "defaultbackend",
-		Port: networking.ServiceBackendPort{
-			Number: 80,
-		},
-	}
 	defaultBackend := networking.IngressBackend{
-		Service: serviceBackend,
+		ServiceName: "default-backend",
+		ServicePort: intstr.FromInt(80),
 	}
+
 	newValid := func() networking.Ingress {
 		return networking.Ingress{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1941,7 +1911,10 @@ func TestValidateIngressTLS(t *testing.T) {
 				Namespace: metav1.NamespaceDefault,
 			},
 			Spec: networking.IngressSpec{
-				DefaultBackend: &defaultBackend,
+				Backend: &networking.IngressBackend{
+					ServiceName: "default-backend",
+					ServicePort: intstr.FromInt(80),
+				},
 				Rules: []networking.IngressRule{
 					{
 						Host: "foo.bar.com",
@@ -2014,14 +1987,9 @@ func TestValidateIngressTLS(t *testing.T) {
 }
 
 func TestValidateIngressStatusUpdate(t *testing.T) {
-	serviceBackend := &networking.IngressServiceBackend{
-		Name: "defaultbackend",
-		Port: networking.ServiceBackendPort{
-			Number: 80,
-		},
-	}
 	defaultBackend := networking.IngressBackend{
-		Service: serviceBackend,
+		ServiceName: "default-backend",
+		ServicePort: intstr.FromInt(80),
 	}
 
 	newValid := func() networking.Ingress {
@@ -2032,7 +2000,10 @@ func TestValidateIngressStatusUpdate(t *testing.T) {
 				ResourceVersion: "9",
 			},
 			Spec: networking.IngressSpec{
-				DefaultBackend: &defaultBackend,
+				Backend: &networking.IngressBackend{
+					ServiceName: "default-backend",
+					ServicePort: intstr.FromInt(80),
+				},
 				Rules: []networking.IngressRule{
 					{
 						Host: "foo.bar.com",

@@ -4,8 +4,9 @@ go_library(
     name = "go_default_library",
     srcs = [
         "aliases.go",
+        "asm_windows_386.s",
+        "asm_windows_amd64.s",
         "dll_windows.go",
-        "empty.s",
         "env_windows.go",
         "eventlog.go",
         "exec_windows.go",
@@ -27,12 +28,6 @@ go_library(
     importmap = "k8s.io/kubernetes/vendor/golang.org/x/sys/windows",
     importpath = "golang.org/x/sys/windows",
     visibility = ["//visibility:public"],
-    deps = select({
-        "@io_bazel_rules_go//go/platform:windows": [
-            "//vendor/golang.org/x/sys/internal/unsafeheader:go_default_library",
-        ],
-        "//conditions:default": [],
-    }),
 )
 
 filegroup(

@@ -154,7 +154,7 @@ type VolumeSource struct {
 	// StorageOS represents a StorageOS volume that is attached to the kubelet's host machine and mounted into the pod
 	// +optional
 	StorageOS *StorageOSVolumeSource
-	// CSI (Container Storage Interface) represents ephemeral storage that is handled by certain external CSI drivers (Beta feature).
+	// CSI (Container Storage Interface) represents storage that is handled by an external CSI driver (Alpha feature).
 	// +optional
 	CSI *CSIVolumeSource
 }
@@ -2693,12 +2693,6 @@ type PodSpec struct {
 	// If not specified, the pod will not have a domainname at all.
 	// +optional
 	Subdomain string
-	// If true the pod's hostname will be configured as the pod's FQDN, rather than the leaf name (the default).
-	// In Linux containers, this means setting the FQDN in the hostname field of the kernel (the nodename field of struct utsname).
-	// In Windows containers, this means setting the registry value of hostname for the registry key HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\Tcpip\\Parameters to FQDN.
-	// If a pod does not have FQDN, this has no effect.
-	// +optional
-	SetHostnameAsFQDN *bool
 	// If specified, the pod's scheduling constraints
 	// +optional
 	Affinity *Affinity
@@ -2731,7 +2725,7 @@ type PodSpec struct {
 	// PreemptionPolicy is the Policy for preempting pods with lower priority.
 	// One of Never, PreemptLowerPriority.
 	// Defaults to PreemptLowerPriority if unset.
-	// This field is beta-level, gated by the NonPreemptingPriority feature-gate.
+	// This field is alpha-level and is only honored by servers that enable the NonPreemptingPriority feature.
 	// +optional
 	PreemptionPolicy *PreemptionPolicy
 	// Specifies the DNS parameters of a pod.
@@ -3513,14 +3507,12 @@ type ServiceSpec struct {
 	// +optional
 	HealthCheckNodePort int32
 
-	// publishNotReadyAddresses indicates that any agent which deals with endpoints for this
-	// Service should disregard any indications of ready/not-ready.
-	// The primary use case for setting this field is for a StatefulSet's Headless Service to
-	// propagate SRV DNS records for its Pods for the purpose of peer discovery.
-	// The Kubernetes controllers that generate Endpoints and EndpointSlice resources for
-	// Services interpret this to mean that all endpoints are considered "ready" even if the
-	// Pods themselves are not. Agents which consume only Kubernetes generated endpoints
-	// through the Endpoints or EndpointSlice resources can safely assume this behavior.
+	// publishNotReadyAddresses, when set to true, indicates that DNS implementations
+	// must publish the notReadyAddresses of subsets for the Endpoints associated with
+	// the Service. The default value is false.
+	// The primary use case for setting this field is to use a StatefulSet's Headless Service
+	// to propagate SRV records for its Pods without respect to their readiness for purpose
+	// of peer discovery.
 	// +optional
 	PublishNotReadyAddresses bool
 

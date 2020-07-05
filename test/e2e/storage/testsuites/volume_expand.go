@@ -86,7 +86,8 @@ func (v *volumeExpandTestSuite) DefineTests(driver TestDriver, pattern testpatte
 		pod      *v1.Pod
 		pod2     *v1.Pod
 
-		migrationCheck *migrationOpCheck
+		intreeOps   opCounts
+		migratedOps opCounts
 	}
 	var l local
 
@@ -111,7 +112,7 @@ func (v *volumeExpandTestSuite) DefineTests(driver TestDriver, pattern testpatte
 
 		// Now do the more expensive test initialization.
 		l.config, l.driverCleanup = driver.PrepareTest(f)
-		l.migrationCheck = newMigrationOpCheck(f.ClientSet, driver.GetDriverInfo().InTreePluginName)
+		l.intreeOps, l.migratedOps = getMigrationVolumeOpCounts(f.ClientSet, driver.GetDriverInfo().InTreePluginName)
 		testVolumeSizeRange := v.GetTestSuiteInfo().SupportedSizeRange
 		l.resource = CreateVolumeResource(driver, l.config, pattern, testVolumeSizeRange)
 	}
@@ -140,7 +141,7 @@ func (v *volumeExpandTestSuite) DefineTests(driver TestDriver, pattern testpatte
 		errs = append(errs, tryFunc(l.driverCleanup))
 		l.driverCleanup = nil
 		framework.ExpectNoError(errors.NewAggregate(errs), "while cleaning up resource")
-		l.migrationCheck.validateMigrationVolumeOpCounts()
+		validateMigrationVolumeOpCounts(f.ClientSet, driver.GetDriverInfo().InTreePluginName, l.intreeOps, l.migratedOps)
 	}
 
 	if !pattern.AllowExpansion {

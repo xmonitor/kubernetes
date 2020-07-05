@@ -239,9 +239,8 @@ func (h *snapshotHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msgSizeVal := m.Size()
-	msgSize := humanize.Bytes(uint64(msgSizeVal))
-	receivedBytes.WithLabelValues(from).Add(float64(msgSizeVal))
+	msgSize := m.Size()
+	receivedBytes.WithLabelValues(from).Add(float64(msgSize))
 
 	if m.Type != raftpb.MsgSnap {
 		if h.lg != nil {
@@ -270,11 +269,11 @@ func (h *snapshotHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			zap.String("local-member-id", h.localID.String()),
 			zap.String("remote-snapshot-sender-id", from),
 			zap.Uint64("incoming-snapshot-index", m.Snapshot.Metadata.Index),
-			zap.Int("incoming-snapshot-message-size-bytes", msgSizeVal),
-			zap.String("incoming-snapshot-message-size", msgSize),
+			zap.Int("incoming-snapshot-message-size-bytes", msgSize),
+			zap.String("incoming-snapshot-message-size", humanize.Bytes(uint64(msgSize))),
 		)
 	} else {
-		plog.Infof("receiving database snapshot [index: %d, from: %s, raft message size: %s]", m.Snapshot.Metadata.Index, types.ID(m.From), msgSize)
+		plog.Infof("receiving database snapshot [index:%d, from %s] ...", m.Snapshot.Metadata.Index, types.ID(m.From))
 	}
 
 	// save incoming database snapshot.
@@ -297,10 +296,8 @@ func (h *snapshotHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dbSize := humanize.Bytes(uint64(n))
 	receivedBytes.WithLabelValues(from).Add(float64(n))
 
-	downloadTook := time.Since(start)
 	if h.lg != nil {
 		h.lg.Info(
 			"received and saved database snapshot",
@@ -308,11 +305,10 @@ func (h *snapshotHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			zap.String("remote-snapshot-sender-id", from),
 			zap.Uint64("incoming-snapshot-index", m.Snapshot.Metadata.Index),
 			zap.Int64("incoming-snapshot-size-bytes", n),
-			zap.String("incoming-snapshot-size", dbSize),
-			zap.String("download-took", downloadTook.String()),
+			zap.String("incoming-snapshot-size", humanize.Bytes(uint64(n))),
 		)
 	} else {
-		plog.Infof("successfully received and saved database snapshot [index: %d, from: %s, raft message size: %s, db size: %s, took: %s]", m.Snapshot.Metadata.Index, types.ID(m.From), msgSize, dbSize, downloadTook.String())
+		plog.Infof("received and saved database snapshot [index: %d, from: %s] successfully", m.Snapshot.Metadata.Index, types.ID(m.From))
 	}
 
 	if err := h.r.Process(context.TODO(), m); err != nil {

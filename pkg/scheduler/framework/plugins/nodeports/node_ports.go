@@ -28,7 +28,6 @@ import (
 // NodePorts is a plugin that checks if a node has free ports for the requested pod ports.
 type NodePorts struct{}
 
-var _ framework.PreFilterPlugin = &NodePorts{}
 var _ framework.FilterPlugin = &NodePorts{}
 
 const (

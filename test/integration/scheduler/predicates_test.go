@@ -24,6 +24,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
@@ -42,11 +43,23 @@ const pollInterval = 100 * time.Millisecond
 func TestInterPodAffinity(t *testing.T) {
 	testCtx := initTest(t, "inter-pod-affinity")
 	defer testutils.CleanupTest(t, testCtx)
-
-	// Add a few nodes with labels
-	nodes, err := createNodes(testCtx.ClientSet, "testnode", st.MakeNode().Label("region", "r1").Label("zone", "z11"), 2)
+	// Add a few nodes.
+	nodes, err := createNodes(testCtx.ClientSet, "testnode", nil, 2)
 	if err != nil {
 		t.Fatalf("Cannot create nodes: %v", err)
+	}
+	// Add labels to the nodes.
+	labels1 := map[string]string{
+		"region": "r1",
+		"zone":   "z11",
+	}
+	for _, node := range nodes {
+		if err = utils.AddLabelsToNode(testCtx.ClientSet, node.Name, labels1); err != nil {
+			t.Fatalf("Cannot add labels to node: %v", err)
+		}
+		if err = waitForNodeLabels(testCtx.ClientSet, node.Name, labels1); err != nil {
+			t.Fatalf("Adding labels to node didn't succeed: %v", err)
+		}
 	}
 
 	cs := testCtx.ClientSet
@@ -872,7 +885,7 @@ func TestEvenPodsSpreadPredicate(t *testing.T) {
 	ns := testCtx.NS.Name
 	defer testutils.CleanupTest(t, testCtx)
 	// Add 4 nodes.
-	nodes, err := createNodes(cs, "node", st.MakeNode(), 4)
+	nodes, err := createNodes(cs, "node", nil, 4)
 	if err != nil {
 		t.Fatalf("Cannot create nodes: %v", err)
 	}
@@ -1036,7 +1049,7 @@ func TestUnschedulablePodBecomesSchedulable(t *testing.T) {
 				Name: "pod-1",
 			},
 			update: func(cs kubernetes.Interface, _ string) error {
-				_, err := createNode(cs, st.MakeNode().Name("node-added").Obj())
+				_, err := createNode(cs, "node-added", nil)
 				if err != nil {
 					return fmt.Errorf("cannot create node: %v", err)
 				}
@@ -1046,7 +1059,7 @@ func TestUnschedulablePodBecomesSchedulable(t *testing.T) {
 		{
 			name: "node gets taint removed",
 			init: func(cs kubernetes.Interface, _ string) error {
-				node, err := createNode(cs, st.MakeNode().Name("node-tainted").Obj())
+				node, err := createNode(cs, "node-tainted", nil)
 				if err != nil {
 					return fmt.Errorf("cannot create node: %v", err)
 				}
@@ -1070,8 +1083,10 @@ func TestUnschedulablePodBecomesSchedulable(t *testing.T) {
 		{
 			name: "other pod gets deleted",
 			init: func(cs kubernetes.Interface, ns string) error {
-				nodeObject := st.MakeNode().Name("node-scheduler-integration-test").Capacity(map[v1.ResourceName]string{v1.ResourcePods: "1"}).Obj()
-				_, err := createNode(cs, nodeObject)
+				nodeResources := &v1.ResourceList{
+					v1.ResourcePods: *resource.NewQuantity(1, resource.DecimalSI),
+				}
+				_, err := createNode(cs, "node-scheduler-integration-test", nodeResources)
 				if err != nil {
 					return fmt.Errorf("cannot create node: %v", err)
 				}
@@ -1091,87 +1106,7 @@ func TestUnschedulablePodBecomesSchedulable(t *testing.T) {
 				return nil
 			},
 		},
-		{
-			name: "pod with pod-affinity gets added",
-			init: func(cs kubernetes.Interface, _ string) error {
-				_, err := createNode(cs, st.MakeNode().Name("node-1").Label("region", "test").Obj())
-				if err != nil {
-					return fmt.Errorf("cannot create node: %v", err)
-				}
-				return nil
-			},
-			pod: &pausePodConfig{
-				Name: "pod-1",
-				Affinity: &v1.Affinity{
-					PodAffinity: &v1.PodAffinity{
-						RequiredDuringSchedulingIgnoredDuringExecution: []v1.PodAffinityTerm{
-							{
-								LabelSelector: &metav1.LabelSelector{
-									MatchLabels: map[string]string{
-										"pod-with-affinity": "true",
-									},
-								},
-								TopologyKey: "region",
-							},
-						},
-					},
-				},
-			},
-			update: func(cs kubernetes.Interface, ns string) error {
-				podConfig := &pausePodConfig{
-					Name:      "pod-with-affinity",
-					Namespace: ns,
-					Labels: map[string]string{
-						"pod-with-affinity": "true",
-					},
-				}
-				if _, err := createPausePod(cs, initPausePod(podConfig)); err != nil {
-					return fmt.Errorf("cannot create pod: %v", err)
-				}
-				return nil
-			},
-		},
-		{
-			name: "scheduled pod gets updated to match affinity",
-			init: func(cs kubernetes.Interface, ns string) error {
-				_, err := createNode(cs, st.MakeNode().Name("node-1").Label("region", "test").Obj())
-				if err != nil {
-					return fmt.Errorf("cannot create node: %v", err)
-				}
-				if _, err := createPausePod(cs, initPausePod(&pausePodConfig{Name: "pod-to-be-updated", Namespace: ns})); err != nil {
-					return fmt.Errorf("cannot create pod: %v", err)
-				}
-				return nil
-			},
-			pod: &pausePodConfig{
-				Name: "pod-1",
-				Affinity: &v1.Affinity{
-					PodAffinity: &v1.PodAffinity{
-						RequiredDuringSchedulingIgnoredDuringExecution: []v1.PodAffinityTerm{
-							{
-								LabelSelector: &metav1.LabelSelector{
-									MatchLabels: map[string]string{
-										"pod-with-affinity": "true",
-									},
-								},
-								TopologyKey: "region",
-							},
-						},
-					},
-				},
-			},
-			update: func(cs kubernetes.Interface, ns string) error {
-				pod, err := getPod(cs, "pod-to-be-updated", ns)
-				if err != nil {
-					return fmt.Errorf("cannot get pod: %v", err)
-				}
-				pod.Labels = map[string]string{"pod-with-affinity": "true"}
-				if _, err := cs.CoreV1().Pods(pod.Namespace).Update(context.TODO(), pod, metav1.UpdateOptions{}); err != nil {
-					return fmt.Errorf("cannot update pod: %v", err)
-				}
-				return nil
-			},
-		},
+		// TODO(#91111): Add more test cases.
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

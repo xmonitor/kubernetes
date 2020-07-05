@@ -94,9 +94,6 @@ type AuthenticateParamIndex struct{}
 // AuthenticateParamSimpleTokenPrefix is used for a key of context in the parameters of Authenticate()
 type AuthenticateParamSimpleTokenPrefix struct{}
 
-// saveConsistentIndexFunc is used to sync consistentIndex to backend, now reusing store.saveIndex
-type saveConsistentIndexFunc func(tx backend.BatchTx)
-
 // AuthStore defines auth storage interface.
 type AuthStore interface {
 	// AuthEnable turns on the authentication feature
@@ -189,9 +186,6 @@ type AuthStore interface {
 
 	// HasRole checks that user has role
 	HasRole(user, role string) bool
-
-	// SetConsistentIndexSyncer sets consistentIndex syncer
-	SetConsistentIndexSyncer(syncer saveConsistentIndexFunc)
 }
 
 type TokenProvider interface {
@@ -215,14 +209,10 @@ type authStore struct {
 
 	rangePermCache map[string]*unifiedRangePermissions // username -> unifiedRangePermissions
 
-	tokenProvider       TokenProvider
-	syncConsistentIndex saveConsistentIndexFunc
-	bcryptCost          int // the algorithm cost / strength for hashing auth passwords
+	tokenProvider TokenProvider
+	bcryptCost    int // the algorithm cost / strength for hashing auth passwords
 }
 
-func (as *authStore) SetConsistentIndexSyncer(syncer saveConsistentIndexFunc) {
-	as.syncConsistentIndex = syncer
-}
 func (as *authStore) AuthEnable() error {
 	as.enabledMu.Lock()
 	defer as.enabledMu.Unlock()
@@ -279,7 +269,6 @@ func (as *authStore) AuthDisable() {
 	tx.Lock()
 	tx.UnsafePut(authBucketName, enableFlagKey, authDisabled)
 	as.commitRevision(tx)
-	as.saveConsistentIndex(tx)
 	tx.Unlock()
 	b.ForceCommit()
 
@@ -346,27 +335,17 @@ func (as *authStore) CheckPassword(username, password string) (uint64, error) {
 		return 0, ErrAuthNotEnabled
 	}
 
-	var user *authpb.User
-	// CompareHashAndPassword is very expensive, so we use closures
-	// to avoid putting it in the critical section of the tx lock.
-	revision, err := func() (uint64, error) {
-		tx := as.be.BatchTx()
-		tx.Lock()
-		defer tx.Unlock()
+	tx := as.be.BatchTx()
+	tx.Lock()
+	defer tx.Unlock()
 
-		user = getUser(as.lg, tx, username)
-		if user == nil {
-			return 0, ErrAuthFailed
-		}
+	user := getUser(as.lg, tx, username)
+	if user == nil {
+		return 0, ErrAuthFailed
+	}
 
-		if user.Options != nil && user.Options.NoPassword {
-			return 0, ErrAuthFailed
-		}
-
-		return getRevision(tx), nil
-	}()
-	if err != nil {
-		return 0, err
+	if user.Options != nil && user.Options.NoPassword {
+		return 0, ErrAuthFailed
 	}
 
 	if bcrypt.CompareHashAndPassword(user.Password, []byte(password)) != nil {
@@ -377,7 +356,7 @@ func (as *authStore) CheckPassword(username, password string) (uint64, error) {
 		}
 		return 0, ErrAuthFailed
 	}
-	return revision, nil
+	return getRevision(tx), nil
 }
 
 func (as *authStore) Recover(be backend.Backend) {
@@ -451,7 +430,6 @@ func (as *authStore) UserAdd(r *pb.AuthUserAddRequest) (*pb.AuthUserAddResponse,
 	putUser(as.lg, tx, newUser)
 
 	as.commitRevision(tx)
-	as.saveConsistentIndex(tx)
 
 	if as.lg != nil {
 		as.lg.Info("added a user", zap.String("user-name", r.Name))
@@ -483,7 +461,6 @@ func (as *authStore) UserDelete(r *pb.AuthUserDeleteRequest) (*pb.AuthUserDelete
 	delUser(tx, r.Name)
 
 	as.commitRevision(tx)
-	as.saveConsistentIndex(tx)
 
 	as.invalidateCachedPerm(r.Name)
 	as.tokenProvider.invalidateUser(r.Name)
@@ -536,7 +513,6 @@ func (as *authStore) UserChangePassword(r *pb.AuthUserChangePasswordRequest) (*p
 	putUser(as.lg, tx, updatedUser)
 
 	as.commitRevision(tx)
-	as.saveConsistentIndex(tx)
 
 	as.invalidateCachedPerm(r.Name)
 	as.tokenProvider.invalidateUser(r.Name)
@@ -593,7 +569,6 @@ func (as *authStore) UserGrantRole(r *pb.AuthUserGrantRoleRequest) (*pb.AuthUser
 	as.invalidateCachedPerm(r.User)
 
 	as.commitRevision(tx)
-	as.saveConsistentIndex(tx)
 
 	if as.lg != nil {
 		as.lg.Info(
@@ -680,7 +655,6 @@ func (as *authStore) UserRevokeRole(r *pb.AuthUserRevokeRoleRequest) (*pb.AuthUs
 	as.invalidateCachedPerm(r.Name)
 
 	as.commitRevision(tx)
-	as.saveConsistentIndex(tx)
 
 	if as.lg != nil {
 		as.lg.Info(
@@ -755,7 +729,6 @@ func (as *authStore) RoleRevokePermission(r *pb.AuthRoleRevokePermissionRequest)
 	as.clearCachedPerm()
 
 	as.commitRevision(tx)
-	as.saveConsistentIndex(tx)
 
 	if as.lg != nil {
 		as.lg.Info(
@@ -815,7 +788,6 @@ func (as *authStore) RoleDelete(r *pb.AuthRoleDeleteRequest) (*pb.AuthRoleDelete
 	}
 
 	as.commitRevision(tx)
-	as.saveConsistentIndex(tx)
 
 	if as.lg != nil {
 		as.lg.Info("deleted a role", zap.String("role-name", r.Role))
@@ -846,7 +818,6 @@ func (as *authStore) RoleAdd(r *pb.AuthRoleAddRequest) (*pb.AuthRoleAddResponse,
 	putRole(as.lg, tx, newRole)
 
 	as.commitRevision(tx)
-	as.saveConsistentIndex(tx)
 
 	if as.lg != nil {
 		as.lg.Info("created a role", zap.String("role-name", r.Name))
@@ -910,7 +881,6 @@ func (as *authStore) RoleGrantPermission(r *pb.AuthRoleGrantPermissionRequest) (
 	as.clearCachedPerm()
 
 	as.commitRevision(tx)
-	as.saveConsistentIndex(tx)
 
 	if as.lg != nil {
 		as.lg.Info(
@@ -934,21 +904,8 @@ func (as *authStore) isOpPermitted(userName string, revision uint64, key, rangeE
 	if revision == 0 {
 		return ErrUserEmpty
 	}
-	rev := as.Revision()
-	if revision < rev {
-		if as.lg != nil {
-			as.lg.Warn("request auth revision is less than current node auth revision",
-				zap.Uint64("current node auth revision", rev),
-				zap.Uint64("request auth revision", revision),
-				zap.ByteString("request key", key),
-				zap.Error(ErrAuthOldRevision))
-		} else {
-			plog.Warningf("request auth revision is less than current node auth revision,"+
-				"current node auth revision is %d,"+
-				"request auth revision is %d,"+
-				"request key is %s, "+
-				"err is %v", rev, revision, key, ErrAuthOldRevision)
-		}
+
+	if revision < as.Revision() {
 		return ErrAuthOldRevision
 	}
 
@@ -1187,8 +1144,6 @@ func NewAuthStore(lg *zap.Logger, be backend.Backend, tp TokenProvider, bcryptCo
 	if as.Revision() == 0 {
 		as.commitRevision(tx)
 	}
-
-	as.setupMetricsReporter()
 
 	tx.Unlock()
 	be.ForceCommit()
@@ -1463,24 +1418,4 @@ func (as *authStore) HasRole(user, role string) bool {
 
 func (as *authStore) BcryptCost() int {
 	return as.bcryptCost
-}
-
-func (as *authStore) saveConsistentIndex(tx backend.BatchTx) {
-	if as.syncConsistentIndex != nil {
-		as.syncConsistentIndex(tx)
-	} else {
-		if as.lg != nil {
-			as.lg.Error("failed to save consistentIndex,syncConsistentIndex is nil")
-		} else {
-			plog.Error("failed to save consistentIndex,syncConsistentIndex is nil")
-		}
-	}
-}
-
-func (as *authStore) setupMetricsReporter() {
-	reportCurrentAuthRevMu.Lock()
-	reportCurrentAuthRev = func() float64 {
-		return float64(as.Revision())
-	}
-	reportCurrentAuthRevMu.Unlock()
 }

@@ -33,6 +33,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"k8s.io/kubernetes/test/e2e/framework"
 )
 
 var filesources []FileSource
@@ -64,6 +66,18 @@ type FileSource interface {
 	DescribeFiles() string
 }
 
+// ReadOrDie tries to retrieve the desired file content from
+// one of the registered file sources. In contrast to FileSource, it
+// will either return a valid slice or abort the test by calling the fatal function,
+// i.e. the caller doesn't have to implement error checking.
+func ReadOrDie(filePath string) []byte {
+	data, err := Read(filePath)
+	if err != nil {
+		framework.Fail(err.Error(), 1)
+	}
+	return data
+}
+
 // Read tries to retrieve the desired file content from
 // one of the registered file sources.
 func Read(filePath string) ([]byte, error) {
@@ -92,17 +106,17 @@ func Read(filePath string) ([]byte, error) {
 // Exists checks whether a file could be read. Unexpected errors
 // are handled by calling the fail function, which then should
 // abort the current test.
-func Exists(filePath string) (bool, error) {
+func Exists(filePath string) bool {
 	for _, filesource := range filesources {
 		data, err := filesource.ReadTestFile(filePath)
 		if err != nil {
-			return false, err
+			framework.Fail(fmt.Sprintf("fatal error looking for test file %s: %s", filePath, err), 1)
 		}
 		if data != nil {
-			return true, nil
+			return true
 		}
 	}
-	return false, nil
+	return false
 }
 
 // RootFileSource looks for files relative to a root directory.

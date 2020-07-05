@@ -64,9 +64,8 @@ var _ Leases = &storageLeases{}
 func (s *storageLeases) ListLeases() ([]string, error) {
 	ipInfoList := &corev1.EndpointsList{}
 	storageOpts := storage.ListOptions{
-		ResourceVersion:      "0",
-		ResourceVersionMatch: metav1.ResourceVersionMatchNotOlderThan,
-		Predicate:            storage.Everything,
+		ResourceVersion: "0",
+		Predicate:       storage.Everything,
 	}
 	if err := s.storage.List(apirequest.NewDefaultContext(), s.baseKey, storageOpts, ipInfoList); err != nil {
 		return nil, err

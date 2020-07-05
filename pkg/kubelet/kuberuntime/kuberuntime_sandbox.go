@@ -30,7 +30,6 @@ import (
 	"k8s.io/kubernetes/pkg/features"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
 	"k8s.io/kubernetes/pkg/kubelet/types"
-	"k8s.io/kubernetes/pkg/kubelet/util"
 	"k8s.io/kubernetes/pkg/kubelet/util/format"
 )
 
@@ -97,15 +96,11 @@ func (m *kubeGenericRuntimeManager) generatePodSandboxConfig(pod *v1.Pod, attemp
 
 	if !kubecontainer.IsHostNetworkPod(pod) {
 		// TODO: Add domain support in new runtime interface
-		podHostname, podDomain, err := m.runtimeHelper.GeneratePodHostNameAndDomain(pod)
+		hostname, _, err := m.runtimeHelper.GeneratePodHostNameAndDomain(pod)
 		if err != nil {
 			return nil, err
 		}
-		podHostname, err = util.GetNodenameForKernel(podHostname, podDomain, pod.Spec.SetHostnameAsFQDN)
-		if err != nil {
-			return nil, err
-		}
-		podSandboxConfig.Hostname = podHostname
+		podSandboxConfig.Hostname = hostname
 	}
 
 	logDir := BuildPodLogsDirectory(pod.Namespace, pod.Name, pod.UID)

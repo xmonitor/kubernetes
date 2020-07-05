@@ -24,7 +24,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
 
-	v1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	featuregatetesting "k8s.io/component-base/featuregate/testing"
@@ -43,7 +43,7 @@ func TestEnvVarsToMap(t *testing.T) {
 		},
 	}
 
-	varMap := envVarsToMap(vars)
+	varMap := EnvVarsToMap(vars)
 
 	if e, a := len(vars), len(varMap); e != a {
 		t.Errorf("Unexpected map length; expected: %d, got %d", e, a)
@@ -414,7 +414,7 @@ func TestShouldContainerBeRestarted(t *testing.T) {
 		ID:        pod.UID,
 		Name:      pod.Name,
 		Namespace: pod.Namespace,
-		ContainerStatuses: []*Status{
+		ContainerStatuses: []*ContainerStatus{
 			{
 				Name:  "alive",
 				State: ContainerStateRunning,

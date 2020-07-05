@@ -28,11 +28,10 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/events"
 	"k8s.io/kubernetes/pkg/scheduler/apis/config"
-	frameworkruntime "k8s.io/kubernetes/pkg/scheduler/framework/runtime"
 	framework "k8s.io/kubernetes/pkg/scheduler/framework/v1alpha1"
 )
 
-var fakeRegistry = frameworkruntime.Registry{
+var fakeRegistry = framework.Registry{
 	"QueueSort": newFakePlugin,
 	"Bind1":     newFakePlugin,
 	"Bind2":     newFakePlugin,
@@ -352,8 +351,8 @@ func newFakePlugin(_ runtime.Object, _ framework.FrameworkHandle) (framework.Plu
 	return &fakePlugin{}, nil
 }
 
-func fakeFrameworkFactory(cfg config.KubeSchedulerProfile, opts ...frameworkruntime.Option) (framework.Framework, error) {
-	return frameworkruntime.NewFramework(fakeRegistry, cfg.Plugins, cfg.PluginConfig, opts...)
+func fakeFrameworkFactory(cfg config.KubeSchedulerProfile, opts ...framework.Option) (framework.Framework, error) {
+	return framework.NewFramework(fakeRegistry, cfg.Plugins, cfg.PluginConfig, opts...)
 }
 
 func nilRecorderFactory(_ string) events.EventRecorder {

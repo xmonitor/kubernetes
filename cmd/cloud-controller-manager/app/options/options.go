@@ -36,6 +36,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	ports "k8s.io/cloud-provider"
 	cliflag "k8s.io/component-base/cli/flag"
+	"k8s.io/klog/v2"
 	ccmconfig "k8s.io/kubernetes/cmd/cloud-controller-manager/app/apis/config"
 	ccmconfigscheme "k8s.io/kubernetes/cmd/cloud-controller-manager/app/apis/config/scheme"
 	ccmconfigv1alpha1 "k8s.io/kubernetes/cmd/cloud-controller-manager/app/apis/config/v1alpha1"
@@ -266,7 +267,7 @@ func (o *CloudControllerManagerOptions) Config(allControllers, disabledByDefault
 
 func createRecorder(kubeClient clientset.Interface, userAgent string) record.EventRecorder {
 	eventBroadcaster := record.NewBroadcaster()
-	eventBroadcaster.StartStructuredLogging(0)
+	eventBroadcaster.StartLogging(klog.Infof)
 	eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: kubeClient.CoreV1().Events("")})
 	return eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: userAgent})
 }

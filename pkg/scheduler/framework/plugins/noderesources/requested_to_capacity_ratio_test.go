@@ -25,7 +25,6 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/kubernetes/pkg/scheduler/apis/config"
-	"k8s.io/kubernetes/pkg/scheduler/framework/runtime"
 	framework "k8s.io/kubernetes/pkg/scheduler/framework/v1alpha1"
 	"k8s.io/kubernetes/pkg/scheduler/internal/cache"
 )
@@ -67,7 +66,7 @@ func TestRequestedToCapacityRatio(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			state := framework.NewCycleState()
 			snapshot := cache.NewSnapshot(test.scheduledPods, test.nodes)
-			fh, _ := runtime.NewFramework(nil, nil, nil, runtime.WithSnapshotSharedLister(snapshot))
+			fh, _ := framework.NewFramework(nil, nil, nil, framework.WithSnapshotSharedLister(snapshot))
 			args := config.RequestedToCapacityRatioArgs{
 				Shape: []config.UtilizationShapePoint{
 					{Utilization: 0, Score: 10},
@@ -319,7 +318,7 @@ func TestResourceBinPackingSingleExtended(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			state := framework.NewCycleState()
 			snapshot := cache.NewSnapshot(test.pods, test.nodes)
-			fh, _ := runtime.NewFramework(nil, nil, nil, runtime.WithSnapshotSharedLister(snapshot))
+			fh, _ := framework.NewFramework(nil, nil, nil, framework.WithSnapshotSharedLister(snapshot))
 			args := config.RequestedToCapacityRatioArgs{
 				Shape: []config.UtilizationShapePoint{
 					{Utilization: 0, Score: 0},
@@ -562,7 +561,7 @@ func TestResourceBinPackingMultipleExtended(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			state := framework.NewCycleState()
 			snapshot := cache.NewSnapshot(test.pods, test.nodes)
-			fh, _ := runtime.NewFramework(nil, nil, nil, runtime.WithSnapshotSharedLister(snapshot))
+			fh, _ := framework.NewFramework(nil, nil, nil, framework.WithSnapshotSharedLister(snapshot))
 			args := config.RequestedToCapacityRatioArgs{
 				Shape: []config.UtilizationShapePoint{
 					{Utilization: 0, Score: 0},

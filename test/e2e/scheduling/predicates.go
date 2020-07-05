@@ -52,8 +52,8 @@ const (
 
 var localStorageVersion = utilversion.MustParseSemantic("v1.8.0-beta.0")
 
-// variable populated in BeforeEach, never modified afterwards
-var workerNodes = sets.String{}
+// variable set in BeforeEach, never modified afterwards
+var masterNodes sets.String
 
 type pausePodConfig struct {
 	Name                              string
@@ -95,14 +95,17 @@ var _ = SIGDescribe("SchedulerPredicates [Serial]", func() {
 
 		framework.AllNodesReady(cs, time.Minute)
 
+		// NOTE: Here doesn't get nodeList for supporting a master nodes which can host workload pods.
+		masterNodes, _, err = e2enode.GetMasterAndWorkerNodes(cs)
+		if err != nil {
+			framework.Logf("Unexpected error occurred: %v", err)
+		}
 		nodeList, err = e2enode.GetReadySchedulableNodes(cs)
 		if err != nil {
 			framework.Logf("Unexpected error occurred: %v", err)
 		}
+
 		framework.ExpectNoErrorWithOffset(0, err)
-		for _, n := range nodeList.Items {
-			workerNodes.Insert(n.Name)
-		}
 
 		err = framework.CheckTestingNSDeletedExcept(cs, ns)
 		framework.ExpectNoError(err)
@@ -132,7 +135,7 @@ var _ = SIGDescribe("SchedulerPredicates [Serial]", func() {
 				nodeMaxAllocatable = allocatable.Value()
 			}
 		}
-		WaitForStableCluster(cs, workerNodes)
+		WaitForStableCluster(cs, masterNodes)
 
 		pods, err := cs.CoreV1().Pods(metav1.NamespaceAll).List(context.TODO(), metav1.ListOptions{})
 		framework.ExpectNoError(err)
@@ -212,7 +215,7 @@ var _ = SIGDescribe("SchedulerPredicates [Serial]", func() {
 		var beardsecond v1.ResourceName = "example.com/beardsecond"
 
 		ginkgo.BeforeEach(func() {
-			WaitForStableCluster(cs, workerNodes)
+			WaitForStableCluster(cs, masterNodes)
 			ginkgo.By("Add RuntimeClass and fake resource")
 
 			// find a node which can run a pod:
@@ -320,7 +323,7 @@ var _ = SIGDescribe("SchedulerPredicates [Serial]", func() {
 		Description: Scheduling Pods MUST fail if the resource requests exceed Machine capacity.
 	*/
 	framework.ConformanceIt("validates resource limits of pods that are allowed to run ", func() {
-		WaitForStableCluster(cs, workerNodes)
+		WaitForStableCluster(cs, masterNodes)
 		nodeMaxAllocatable := int64(0)
 		nodeToAllocatableMap := make(map[string]int64)
 		for _, node := range nodeList.Items {
@@ -433,7 +436,7 @@ var _ = SIGDescribe("SchedulerPredicates [Serial]", func() {
 		ginkgo.By("Trying to schedule Pod with nonempty NodeSelector.")
 		podName := "restricted-pod"
 
-		WaitForStableCluster(cs, workerNodes)
+		WaitForStableCluster(cs, masterNodes)
 
 		conf := pausePodConfig{
 			Name:   podName,
@@ -488,7 +491,7 @@ var _ = SIGDescribe("SchedulerPredicates [Serial]", func() {
 		ginkgo.By("Trying to schedule Pod with nonempty NodeSelector.")
 		podName := "restricted-pod"
 
-		WaitForStableCluster(cs, workerNodes)
+		WaitForStableCluster(cs, masterNodes)
 
 		conf := pausePodConfig{
 			Name: podName,
@@ -930,7 +933,7 @@ func WaitForSchedulerAfterAction(f *framework.Framework, action Action, ns, podN
 func verifyResult(c clientset.Interface, expectedScheduled int, expectedNotScheduled int, ns string) {
 	allPods, err := c.CoreV1().Pods(ns).List(context.TODO(), metav1.ListOptions{})
 	framework.ExpectNoError(err)
-	scheduledPods, notScheduledPods := GetPodsScheduled(workerNodes, allPods)
+	scheduledPods, notScheduledPods := GetPodsScheduled(masterNodes, allPods)
 
 	framework.ExpectEqual(len(notScheduledPods), expectedNotScheduled, fmt.Sprintf("Not scheduled Pods: %#v", notScheduledPods))
 	framework.ExpectEqual(len(scheduledPods), expectedScheduled, fmt.Sprintf("Scheduled Pods: %#v", scheduledPods))
@@ -1042,18 +1045,28 @@ func translateIPv4ToIPv6(ip string) string {
 	return ip
 }
 
-// GetPodsScheduled returns a number of currently scheduled and not scheduled Pods on worker nodes.
-func GetPodsScheduled(workerNodes sets.String, pods *v1.PodList) (scheduledPods, notScheduledPods []v1.Pod) {
+// GetPodsScheduled returns a number of currently scheduled and not scheduled Pods.
+func GetPodsScheduled(masterNodes sets.String, pods *v1.PodList) (scheduledPods, notScheduledPods []v1.Pod) {
 	for _, pod := range pods.Items {
-		if pod.Spec.NodeName != "" && workerNodes.Has(pod.Spec.NodeName) {
-			_, scheduledCondition := podutil.GetPodCondition(&pod.Status, v1.PodScheduled)
-			framework.ExpectEqual(scheduledCondition != nil, true)
-			if scheduledCondition != nil {
-				framework.ExpectEqual(scheduledCondition.Status, v1.ConditionTrue)
-				scheduledPods = append(scheduledPods, pod)
+		if !masterNodes.Has(pod.Spec.NodeName) {
+			if pod.Spec.NodeName != "" {
+				_, scheduledCondition := podutil.GetPodCondition(&pod.Status, v1.PodScheduled)
+				framework.ExpectEqual(scheduledCondition != nil, true)
+				if scheduledCondition != nil {
+					framework.ExpectEqual(scheduledCondition.Status, v1.ConditionTrue)
+					scheduledPods = append(scheduledPods, pod)
+				}
+			} else {
+				_, scheduledCondition := podutil.GetPodCondition(&pod.Status, v1.PodScheduled)
+				framework.ExpectEqual(scheduledCondition != nil, true)
+				if scheduledCondition != nil {
+					framework.ExpectEqual(scheduledCondition.Status, v1.ConditionFalse)
+					if scheduledCondition.Reason == "Unschedulable" {
+
+						notScheduledPods = append(notScheduledPods, pod)
+					}
+				}
 			}
-		} else if pod.Spec.NodeName == "" {
-			notScheduledPods = append(notScheduledPods, pod)
 		}
 	}
 	return

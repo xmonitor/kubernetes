@@ -35,11 +35,6 @@ import (
 	"k8s.io/legacy-cloud-providers/azure"
 )
 
-const (
-	TagsDelimiter        = ","
-	TagKeyValueDelimiter = "="
-)
-
 type azureDiskProvisioner struct {
 	plugin  *azureDataDiskPlugin
 	options volume.VolumeOptions
@@ -123,7 +118,6 @@ func (p *azureDiskProvisioner) Provision(selectedNode *v1.Node, allowedTopologie
 		diskIopsReadWrite   string
 		diskMbpsReadWrite   string
 		diskEncryptionSetID string
-		customTags          string
 
 		maxShares int
 	)
@@ -170,8 +164,6 @@ func (p *azureDiskProvisioner) Provision(selectedNode *v1.Node, allowedTopologie
 			diskMbpsReadWrite = v
 		case "diskencryptionsetid":
 			diskEncryptionSetID = v
-		case "tags":
-			customTags = v
 		case azure.WriteAcceleratorEnabled:
 			writeAcceleratorEnabled = v
 		case "maxshares":
@@ -269,14 +261,9 @@ func (p *azureDiskProvisioner) Provision(selectedNode *v1.Node, allowedTopologie
 	diskURI := ""
 	labels := map[string]string{}
 	if kind == v1.AzureManagedDisk {
-		tags, err := ConvertTagsToMap(customTags)
-		if err != nil {
-			return nil, err
-		}
+		tags := make(map[string]string)
 		if p.options.CloudTags != nil {
-			for k, v := range *(p.options.CloudTags) {
-				tags[k] = v
-			}
+			tags = *(p.options.CloudTags)
 		}
 		if strings.EqualFold(writeAcceleratorEnabled, "true") {
 			tags[azure.WriteAcceleratorEnabled] = "true"
@@ -398,29 +385,4 @@ func (p *azureDiskProvisioner) Provision(selectedNode *v1.Node, allowedTopologie
 	}
 
 	return pv, nil
-}
-
-// ConvertTagsToMap convert the tags from string to map
-// the valid tags fomat is "key1=value1,key2=value2", which could be converted to
-// {"key1": "value1", "key2": "value2"}
-func ConvertTagsToMap(tags string) (map[string]string, error) {
-	m := make(map[string]string)
-	if tags == "" {
-		return m, nil
-	}
-	s := strings.Split(tags, TagsDelimiter)
-	for _, tag := range s {
-		kv := strings.Split(tag, TagKeyValueDelimiter)
-		if len(kv) != 2 {
-			return nil, fmt.Errorf("Tags '%s' are invalid, the format should like: 'key1=value1,key2=value2'", tags)
-		}
-		key := strings.TrimSpace(kv[0])
-		if key == "" {
-			return nil, fmt.Errorf("Tags '%s' are invalid, the format should like: 'key1=value1,key2=value2'", tags)
-		}
-		value := strings.TrimSpace(kv[1])
-		m[key] = value
-	}
-
-	return m, nil
 }

@@ -78,7 +78,7 @@ func NewCIDRRangeAllocator(client clientset.Interface, nodeInformer informers.No
 
 	eventBroadcaster := record.NewBroadcaster()
 	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: "cidrAllocator"})
-	eventBroadcaster.StartStructuredLogging(0)
+	eventBroadcaster.StartLogging(klog.Infof)
 	klog.V(0).Infof("Sending events to api server.")
 	eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: client.CoreV1().Events("")})
 

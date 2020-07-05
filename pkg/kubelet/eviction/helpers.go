@@ -164,7 +164,7 @@ func addAllocatableThresholds(thresholds []evictionapi.Threshold) []evictionapi.
 			})
 		}
 	}
-	return append(append([]evictionapi.Threshold{}, thresholds...), additionalThresholds...)
+	return append(thresholds, additionalThresholds...)
 }
 
 // parseThresholdStatements parses the input statements into a list of Threshold objects.

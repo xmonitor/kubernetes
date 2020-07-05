@@ -95,7 +95,8 @@ func (t *volumeIOTestSuite) DefineTests(driver TestDriver, pattern testpatterns.
 
 		resource *VolumeResource
 
-		migrationCheck *migrationOpCheck
+		intreeOps   opCounts
+		migratedOps opCounts
 	}
 	var (
 		dInfo = driver.GetDriverInfo()
@@ -115,7 +116,7 @@ func (t *volumeIOTestSuite) DefineTests(driver TestDriver, pattern testpatterns.
 
 		// Now do the more expensive test initialization.
 		l.config, l.driverCleanup = driver.PrepareTest(f)
-		l.migrationCheck = newMigrationOpCheck(f.ClientSet, dInfo.InTreePluginName)
+		l.intreeOps, l.migratedOps = getMigrationVolumeOpCounts(f.ClientSet, dInfo.InTreePluginName)
 
 		testVolumeSizeRange := t.GetTestSuiteInfo().SupportedSizeRange
 		l.resource = CreateVolumeResource(driver, l.config, pattern, testVolumeSizeRange)
@@ -138,7 +139,7 @@ func (t *volumeIOTestSuite) DefineTests(driver TestDriver, pattern testpatterns.
 		}
 
 		framework.ExpectNoError(errors.NewAggregate(errs), "while cleaning up resource")
-		l.migrationCheck.validateMigrationVolumeOpCounts()
+		validateMigrationVolumeOpCounts(f.ClientSet, dInfo.InTreePluginName, l.intreeOps, l.migratedOps)
 	}
 
 	ginkgo.It("should write files of various sizes, verify size, validate content [Slow]", func() {

@@ -189,7 +189,6 @@ var (
 		"ImageGCHighThresholdPercent",
 		"ImageGCLowThresholdPercent",
 		"ImageMinimumGCAge.Duration",
-		"KernelMemcgNotification",
 		"KubeAPIBurst",
 		"KubeAPIQPS",
 		"KubeReservedCgroup",

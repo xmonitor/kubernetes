@@ -525,7 +525,42 @@ func (s *Plugin) createVolume(tokenVolumeName, secretName string) api.Volume {
 		return api.Volume{
 			Name: tokenVolumeName,
 			VolumeSource: api.VolumeSource{
-				Projected: TokenVolumeSource(),
+				Projected: &api.ProjectedVolumeSource{
+					Sources: []api.VolumeProjection{
+						{
+							ServiceAccountToken: &api.ServiceAccountTokenProjection{
+								Path:              "token",
+								ExpirationSeconds: serviceaccount.WarnOnlyBoundTokenExpirationSeconds,
+							},
+						},
+						{
+							ConfigMap: &api.ConfigMapProjection{
+								LocalObjectReference: api.LocalObjectReference{
+									Name: "kube-root-ca.crt",
+								},
+								Items: []api.KeyToPath{
+									{
+										Key:  "ca.crt",
+										Path: "ca.crt",
+									},
+								},
+							},
+						},
+						{
+							DownwardAPI: &api.DownwardAPIProjection{
+								Items: []api.DownwardAPIVolumeFile{
+									{
+										Path: "namespace",
+										FieldRef: &api.ObjectFieldSelector{
+											APIVersion: "v1",
+											FieldPath:  "metadata.namespace",
+										},
+									},
+								},
+							},
+						},
+					},
+				},
 			},
 		}
 	}
@@ -534,46 +569,6 @@ func (s *Plugin) createVolume(tokenVolumeName, secretName string) api.Volume {
 		VolumeSource: api.VolumeSource{
 			Secret: &api.SecretVolumeSource{
 				SecretName: secretName,
-			},
-		},
-	}
-}
-
-// TokenVolumeSource returns the projected volume source for service account token.
-func TokenVolumeSource() *api.ProjectedVolumeSource {
-	return &api.ProjectedVolumeSource{
-		Sources: []api.VolumeProjection{
-			{
-				ServiceAccountToken: &api.ServiceAccountTokenProjection{
-					Path:              "token",
-					ExpirationSeconds: serviceaccount.WarnOnlyBoundTokenExpirationSeconds,
-				},
-			},
-			{
-				ConfigMap: &api.ConfigMapProjection{
-					LocalObjectReference: api.LocalObjectReference{
-						Name: "kube-root-ca.crt",
-					},
-					Items: []api.KeyToPath{
-						{
-							Key:  "ca.crt",
-							Path: "ca.crt",
-						},
-					},
-				},
-			},
-			{
-				DownwardAPI: &api.DownwardAPIProjection{
-					Items: []api.DownwardAPIVolumeFile{
-						{
-							Path: "namespace",
-							FieldRef: &api.ObjectFieldSelector{
-								APIVersion: "v1",
-								FieldPath:  "metadata.namespace",
-							},
-						},
-					},
-				},
 			},
 		},
 	}

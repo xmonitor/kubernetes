@@ -60,11 +60,7 @@ func (CassandraUpgradeTest) Skip(upgCtx UpgradeContext) bool {
 }
 
 func cassandraKubectlCreate(ns, file string) {
-	data, err := e2etestfiles.Read(filepath.Join(cassandraManifestPath, file))
-	if err != nil {
-		framework.Fail(err.Error())
-	}
-	input := string(data)
+	input := string(e2etestfiles.ReadOrDie(filepath.Join(cassandraManifestPath, file)))
 	framework.RunKubectlOrDieInput(ns, input, "create", "-f", "-", fmt.Sprintf("--namespace=%s", ns))
 }
 

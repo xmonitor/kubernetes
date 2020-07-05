@@ -26,6 +26,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	policy "k8s.io/api/policy/v1beta1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -45,11 +46,10 @@ import (
 	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/scheduler"
 	schedulerconfig "k8s.io/kubernetes/pkg/scheduler/apis/config"
-	frameworkruntime "k8s.io/kubernetes/pkg/scheduler/framework/runtime"
 	framework "k8s.io/kubernetes/pkg/scheduler/framework/v1alpha1"
-	st "k8s.io/kubernetes/pkg/scheduler/testing"
 	"k8s.io/kubernetes/plugin/pkg/admission/priority"
 	testutils "k8s.io/kubernetes/test/integration/util"
+	"k8s.io/kubernetes/test/utils"
 )
 
 var lowPriority, mediumPriority, highPriority = int32(100), int32(200), int32(300)
@@ -125,7 +125,7 @@ var _ framework.FilterPlugin = &tokenFilter{}
 func TestPreemption(t *testing.T) {
 	// Initialize scheduler with a filter plugin.
 	var filter tokenFilter
-	registry := make(frameworkruntime.Registry)
+	registry := make(framework.Registry)
 	err := registry.Register(filterPluginName, func(_ runtime.Object, fh framework.FrameworkHandle) (framework.Plugin, error) {
 		return &filter, nil
 	})
@@ -379,14 +379,21 @@ func TestPreemption(t *testing.T) {
 	}
 
 	// Create a node with some resources and a label.
-	nodeRes := map[v1.ResourceName]string{
-		v1.ResourcePods:   "32",
-		v1.ResourceCPU:    "500m",
-		v1.ResourceMemory: "500",
+	nodeRes := &v1.ResourceList{
+		v1.ResourcePods:   *resource.NewQuantity(32, resource.DecimalSI),
+		v1.ResourceCPU:    *resource.NewMilliQuantity(500, resource.DecimalSI),
+		v1.ResourceMemory: *resource.NewQuantity(500, resource.DecimalSI),
 	}
-	nodeObject := st.MakeNode().Name("node1").Capacity(nodeRes).Label("node", "node1").Obj()
-	if _, err := createNode(testCtx.ClientSet, nodeObject); err != nil {
-		t.Fatalf("Error creating node: %v", err)
+	node, err := createNode(testCtx.ClientSet, "node1", nodeRes)
+	if err != nil {
+		t.Fatalf("Error creating nodes: %v", err)
+	}
+	nodeLabels := map[string]string{"node": node.Name}
+	if err = utils.AddLabelsToNode(testCtx.ClientSet, node.Name, nodeLabels); err != nil {
+		t.Fatalf("Cannot add labels to node: %v", err)
+	}
+	if err = waitForNodeLabels(testCtx.ClientSet, node.Name, nodeLabels); err != nil {
+		t.Fatalf("Adding labels to node didn't succeed: %v", err)
 	}
 
 	for _, test := range tests {
@@ -474,13 +481,13 @@ func TestNonPreemption(t *testing.T) {
 		},
 	})
 
-	// Create a node with some resources
-	nodeRes := map[v1.ResourceName]string{
-		v1.ResourcePods:   "32",
-		v1.ResourceCPU:    "500m",
-		v1.ResourceMemory: "500",
+	// Create a node with some resources and a label.
+	nodeRes := &v1.ResourceList{
+		v1.ResourcePods:   *resource.NewQuantity(32, resource.DecimalSI),
+		v1.ResourceCPU:    *resource.NewMilliQuantity(500, resource.DecimalSI),
+		v1.ResourceMemory: *resource.NewQuantity(500, resource.DecimalSI),
 	}
-	_, err := createNode(testCtx.ClientSet, st.MakeNode().Name("node1").Capacity(nodeRes).Obj())
+	_, err := createNode(testCtx.ClientSet, "node1", nodeRes)
 	if err != nil {
 		t.Fatalf("Error creating nodes: %v", err)
 	}
@@ -550,13 +557,13 @@ func TestDisablePreemption(t *testing.T) {
 		},
 	}
 
-	// Create a node with some resources
-	nodeRes := map[v1.ResourceName]string{
-		v1.ResourcePods:   "32",
-		v1.ResourceCPU:    "500m",
-		v1.ResourceMemory: "500",
+	// Create a node with some resources and a label.
+	nodeRes := &v1.ResourceList{
+		v1.ResourcePods:   *resource.NewQuantity(32, resource.DecimalSI),
+		v1.ResourceCPU:    *resource.NewMilliQuantity(500, resource.DecimalSI),
+		v1.ResourceMemory: *resource.NewQuantity(500, resource.DecimalSI),
 	}
-	_, err := createNode(testCtx.ClientSet, st.MakeNode().Name("node1").Capacity(nodeRes).Obj())
+	_, err := createNode(testCtx.ClientSet, "node1", nodeRes)
 	if err != nil {
 		t.Fatalf("Error creating nodes: %v", err)
 	}
@@ -657,13 +664,13 @@ func TestPodPriorityResolution(t *testing.T) {
 		},
 	}
 
-	// Create a node with some resources
-	nodeRes := map[v1.ResourceName]string{
-		v1.ResourcePods:   "32",
-		v1.ResourceCPU:    "500m",
-		v1.ResourceMemory: "500",
+	// Create a node with some resources and a label.
+	nodeRes := &v1.ResourceList{
+		v1.ResourcePods:   *resource.NewQuantity(32, resource.DecimalSI),
+		v1.ResourceCPU:    *resource.NewMilliQuantity(500, resource.DecimalSI),
+		v1.ResourceMemory: *resource.NewQuantity(500, resource.DecimalSI),
 	}
-	_, err := createNode(testCtx.ClientSet, st.MakeNode().Name("node1").Capacity(nodeRes).Obj())
+	_, err := createNode(testCtx.ClientSet, "node1", nodeRes)
 	if err != nil {
 		t.Fatalf("Error creating nodes: %v", err)
 	}
@@ -747,13 +754,13 @@ func TestPreemptionStarvation(t *testing.T) {
 		},
 	}
 
-	// Create a node with some resources
-	nodeRes := map[v1.ResourceName]string{
-		v1.ResourcePods:   "32",
-		v1.ResourceCPU:    "500m",
-		v1.ResourceMemory: "500",
+	// Create a node with some resources and a label.
+	nodeRes := &v1.ResourceList{
+		v1.ResourcePods:   *resource.NewQuantity(32, resource.DecimalSI),
+		v1.ResourceCPU:    *resource.NewMilliQuantity(500, resource.DecimalSI),
+		v1.ResourceMemory: *resource.NewQuantity(500, resource.DecimalSI),
 	}
-	_, err := createNode(testCtx.ClientSet, st.MakeNode().Name("node1").Capacity(nodeRes).Obj())
+	_, err := createNode(testCtx.ClientSet, "node1", nodeRes)
 	if err != nil {
 		t.Fatalf("Error creating nodes: %v", err)
 	}
@@ -848,13 +855,13 @@ func TestPreemptionRaces(t *testing.T) {
 		},
 	}
 
-	// Create a node with some resources
-	nodeRes := map[v1.ResourceName]string{
-		v1.ResourcePods:   "100",
-		v1.ResourceCPU:    "5000m",
-		v1.ResourceMemory: "5000",
+	// Create a node with some resources and a label.
+	nodeRes := &v1.ResourceList{
+		v1.ResourcePods:   *resource.NewQuantity(100, resource.DecimalSI),
+		v1.ResourceCPU:    *resource.NewMilliQuantity(5000, resource.DecimalSI),
+		v1.ResourceMemory: *resource.NewQuantity(5000, resource.DecimalSI),
 	}
-	_, err := createNode(testCtx.ClientSet, st.MakeNode().Name("node1").Capacity(nodeRes).Obj())
+	_, err := createNode(testCtx.ClientSet, "node1", nodeRes)
 	if err != nil {
 		t.Fatalf("Error creating nodes: %v", err)
 	}
@@ -947,13 +954,13 @@ func TestNominatedNodeCleanUp(t *testing.T) {
 
 	defer cleanupPodsInNamespace(cs, t, testCtx.NS.Name)
 
-	// Create a node with some resources
-	nodeRes := map[v1.ResourceName]string{
-		v1.ResourcePods:   "32",
-		v1.ResourceCPU:    "500m",
-		v1.ResourceMemory: "500",
+	// Create a node with some resources and a label.
+	nodeRes := &v1.ResourceList{
+		v1.ResourcePods:   *resource.NewQuantity(32, resource.DecimalSI),
+		v1.ResourceCPU:    *resource.NewMilliQuantity(500, resource.DecimalSI),
+		v1.ResourceMemory: *resource.NewQuantity(500, resource.DecimalSI),
 	}
-	_, err := createNode(testCtx.ClientSet, st.MakeNode().Name("node1").Capacity(nodeRes).Obj())
+	_, err := createNode(testCtx.ClientSet, "node1", nodeRes)
 	if err != nil {
 		t.Fatalf("Error creating nodes: %v", err)
 	}
@@ -1023,6 +1030,93 @@ func TestNominatedNodeCleanUp(t *testing.T) {
 	}
 }
 
+func TestNominatedNodeCleanUpUponNodeDeletion(t *testing.T) {
+	// Initialize scheduler.
+	testCtx := initTest(t, "preemption")
+	defer testutils.CleanupTest(t, testCtx)
+
+	cs := testCtx.ClientSet
+	defer cleanupPodsInNamespace(cs, t, testCtx.NS.Name)
+
+	// Create a node with some resources and a label.
+	nodeRes := &v1.ResourceList{
+		v1.ResourcePods:   *resource.NewQuantity(32, resource.DecimalSI),
+		v1.ResourceCPU:    *resource.NewMilliQuantity(100, resource.DecimalSI),
+		v1.ResourceMemory: *resource.NewQuantity(100, resource.DecimalSI),
+	}
+	nodeNames := []string{"node1", "node2"}
+	for _, nodeName := range nodeNames {
+		_, err := createNode(testCtx.ClientSet, nodeName, nodeRes)
+		if err != nil {
+			t.Fatalf("Error creating nodes: %v", err)
+		}
+	}
+
+	// Fill the cluster with one high-priority and one low-priority Pod.
+	highPriPod, err := createPausePod(cs, mkPriorityPodWithGrace(testCtx, "high-pod", highPriority, 60))
+	if err != nil {
+		t.Fatalf("Error creating high-priority pod: %v", err)
+	}
+	// Make sure the pod is scheduled.
+	if err := testutils.WaitForPodToSchedule(cs, highPriPod); err != nil {
+		t.Fatalf("Pod %v/%v didn't get scheduled: %v", highPriPod.Namespace, highPriPod.Name, err)
+	}
+
+	lowPriPod, err := createPausePod(cs, mkPriorityPodWithGrace(testCtx, "low-pod", lowPriority, 60))
+	if err != nil {
+		t.Fatalf("Error creating low-priority pod: %v", err)
+	}
+	// Make sure the pod is scheduled.
+	if err := testutils.WaitForPodToSchedule(cs, lowPriPod); err != nil {
+		t.Fatalf("Pod %v/%v didn't get scheduled: %v", lowPriPod.Namespace, lowPriPod.Name, err)
+	}
+
+	// Create a medium-priority Pod.
+	medPriPod, err := createPausePod(cs, mkPriorityPodWithGrace(testCtx, "med-pod", mediumPriority, 60))
+	if err != nil {
+		t.Fatalf("Error creating med-priority pod: %v", err)
+	}
+	// Check its nominatedNodeName field is set properly.
+	if err := waitForNominatedNodeName(cs, medPriPod); err != nil {
+		t.Fatalf("NominatedNodeName was not set for pod %v/%v: %v", medPriPod.Namespace, medPriPod.Name, err)
+	}
+
+	// Get the live version of low and med pods.
+	lowPriPod, _ = getPod(cs, lowPriPod.Name, lowPriPod.Namespace)
+	medPriPod, _ = getPod(cs, medPriPod.Name, medPriPod.Namespace)
+
+	want, got := lowPriPod.Spec.NodeName, medPriPod.Status.NominatedNodeName
+	if want != got {
+		t.Fatalf("Expect med-priority's nominatedNodeName to be %v, but got %v.", want, got)
+	}
+
+	// Delete the node where med-priority pod is nominated to.
+	cs.CoreV1().Nodes().Delete(context.TODO(), got, metav1.DeleteOptions{})
+	if err := wait.Poll(200*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
+		_, err := cs.CoreV1().Nodes().Get(context.TODO(), got, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return true, nil
+		}
+		return false, err
+	}); err != nil {
+		t.Fatalf("Node %v cannot be deleted: %v.", got, err)
+	}
+
+	// Finally verify if med-priority pod's nominatedNodeName gets cleared.
+	if err := wait.Poll(200*time.Millisecond, wait.ForeverTestTimeout, func() (bool, error) {
+		pod, err := cs.CoreV1().Pods(medPriPod.Namespace).Get(context.TODO(), medPriPod.Name, metav1.GetOptions{})
+		if err != nil {
+			t.Errorf("Error getting the medium priority pod info: %v", err)
+		}
+		if len(pod.Status.NominatedNodeName) == 0 {
+			return true, nil
+		}
+		return false, err
+	}); err != nil {
+		t.Errorf("The nominated node name of the medium priority pod was not cleared: %v", err)
+	}
+}
+
 func mkMinAvailablePDB(name, namespace string, uid types.UID, minAvailable int, matchLabels map[string]string) *policy.PodDisruptionBudget {
 	intMinAvailable := intstr.FromInt(minAvailable)
 	return &policy.PodDisruptionBudget{
@@ -1062,15 +1156,15 @@ func TestPDBInPreemption(t *testing.T) {
 		v1.ResourceCPU:    *resource.NewMilliQuantity(100, resource.DecimalSI),
 		v1.ResourceMemory: *resource.NewQuantity(100, resource.DecimalSI)},
 	}
-	defaultNodeRes := map[v1.ResourceName]string{
-		v1.ResourcePods:   "32",
-		v1.ResourceCPU:    "500m",
-		v1.ResourceMemory: "500",
+	defaultNodeRes := &v1.ResourceList{
+		v1.ResourcePods:   *resource.NewQuantity(32, resource.DecimalSI),
+		v1.ResourceCPU:    *resource.NewMilliQuantity(500, resource.DecimalSI),
+		v1.ResourceMemory: *resource.NewQuantity(500, resource.DecimalSI),
 	}
 
 	type nodeConfig struct {
 		name string
-		res  map[v1.ResourceName]string
+		res  *v1.ResourceList
 	}
 
 	tests := []struct {
@@ -1246,7 +1340,7 @@ func TestPDBInPreemption(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			for _, nodeConf := range test.nodes {
-				_, err := createNode(cs, st.MakeNode().Name(nodeConf.name).Capacity(nodeConf.res).Obj())
+				_, err := createNode(cs, nodeConf.name, nodeConf.res)
 				if err != nil {
 					t.Fatalf("Error creating node %v: %v", nodeConf.name, err)
 				}

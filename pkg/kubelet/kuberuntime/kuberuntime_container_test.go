@@ -128,7 +128,7 @@ func TestToKubeContainerStatus(t *testing.T) {
 
 	for desc, test := range map[string]struct {
 		input    *runtimeapi.ContainerStatus
-		expected *kubecontainer.Status
+		expected *kubecontainer.ContainerStatus
 	}{
 		"created container": {
 			input: &runtimeapi.ContainerStatus{
@@ -138,7 +138,7 @@ func TestToKubeContainerStatus(t *testing.T) {
 				State:     runtimeapi.ContainerState_CONTAINER_CREATED,
 				CreatedAt: createdAt,
 			},
-			expected: &kubecontainer.Status{
+			expected: &kubecontainer.ContainerStatus{
 				ID:        *cid,
 				Image:     imageSpec.Image,
 				State:     kubecontainer.ContainerStateCreated,
@@ -154,7 +154,7 @@ func TestToKubeContainerStatus(t *testing.T) {
 				CreatedAt: createdAt,
 				StartedAt: startedAt,
 			},
-			expected: &kubecontainer.Status{
+			expected: &kubecontainer.ContainerStatus{
 				ID:        *cid,
 				Image:     imageSpec.Image,
 				State:     kubecontainer.ContainerStateRunning,
@@ -175,7 +175,7 @@ func TestToKubeContainerStatus(t *testing.T) {
 				Reason:     "GotKilled",
 				Message:    "The container was killed",
 			},
-			expected: &kubecontainer.Status{
+			expected: &kubecontainer.ContainerStatus{
 				ID:         *cid,
 				Image:      imageSpec.Image,
 				State:      kubecontainer.ContainerStateExited,
@@ -196,7 +196,7 @@ func TestToKubeContainerStatus(t *testing.T) {
 				CreatedAt: createdAt,
 				StartedAt: startedAt,
 			},
-			expected: &kubecontainer.Status{
+			expected: &kubecontainer.ContainerStatus{
 				ID:        *cid,
 				Image:     imageSpec.Image,
 				State:     kubecontainer.ContainerStateUnknown,
@@ -316,7 +316,7 @@ func TestLifeCycleHook(t *testing.T) {
 		testPod.Spec.Containers[0].Lifecycle = cmdPostStart
 		testContainer := &testPod.Spec.Containers[0]
 		fakePodStatus := &kubecontainer.PodStatus{
-			ContainerStatuses: []*kubecontainer.Status{
+			ContainerStatuses: []*kubecontainer.ContainerStatus{
 				{
 					ID: kubecontainer.ContainerID{
 						Type: "docker",
@@ -342,7 +342,7 @@ func TestLifeCycleHook(t *testing.T) {
 
 func TestStartSpec(t *testing.T) {
 	podStatus := &kubecontainer.PodStatus{
-		ContainerStatuses: []*kubecontainer.Status{
+		ContainerStatuses: []*kubecontainer.ContainerStatus{
 			{
 				ID: kubecontainer.ContainerID{
 					Type: "docker",

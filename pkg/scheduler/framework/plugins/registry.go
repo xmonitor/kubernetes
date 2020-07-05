@@ -18,7 +18,7 @@ package plugins
 
 import (
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/defaultbinder"
-	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/defaultpreemption"
+	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/defaultpodtopologyspread"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/imagelocality"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/interpodaffinity"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/nodeaffinity"
@@ -31,21 +31,20 @@ import (
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/nodevolumelimits"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/podtopologyspread"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/queuesort"
-	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/selectorspread"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/serviceaffinity"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/tainttoleration"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/volumebinding"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/volumerestrictions"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/volumezone"
-	"k8s.io/kubernetes/pkg/scheduler/framework/runtime"
+	framework "k8s.io/kubernetes/pkg/scheduler/framework/v1alpha1"
 )
 
 // NewInTreeRegistry builds the registry with all the in-tree plugins.
 // A scheduler that runs out of tree plugins can register additional plugins
 // through the WithFrameworkOutOfTreeRegistry option.
-func NewInTreeRegistry() runtime.Registry {
-	return runtime.Registry{
-		selectorspread.Name:                        selectorspread.New,
+func NewInTreeRegistry() framework.Registry {
+	return framework.Registry{
+		defaultpodtopologyspread.Name:              defaultpodtopologyspread.New,
 		imagelocality.Name:                         imagelocality.New,
 		tainttoleration.Name:                       tainttoleration.New,
 		nodename.Name:                              nodename.New,
@@ -72,6 +71,5 @@ func NewInTreeRegistry() runtime.Registry {
 		serviceaffinity.Name:                       serviceaffinity.New,
 		queuesort.Name:                             queuesort.New,
 		defaultbinder.Name:                         defaultbinder.New,
-		defaultpreemption.Name:                     defaultpreemption.New,
 	}
 }
