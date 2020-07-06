@@ -114,6 +114,7 @@ type RequestInfoFactory struct {
 // /api
 // /healthz
 // /
+// 把 http.Request 转换为 RequestInfo
 func (r *RequestInfoFactory) NewRequestInfo(req *http.Request) (*RequestInfo, error) {
 	// start with a non-resource request until proven otherwise
 	requestInfo := RequestInfo{

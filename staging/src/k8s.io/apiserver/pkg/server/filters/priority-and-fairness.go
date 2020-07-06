@@ -69,6 +69,7 @@ func WithPriorityAndFairness(
 	startOnce.Do(startRecordingUsage)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+		// 获取到 RequestInfo
 		requestInfo, ok := apirequest.RequestInfoFrom(ctx)
 		if !ok {
 			handleError(w, r, fmt.Errorf("no RequestInfo found in context"))
@@ -81,6 +82,7 @@ func WithPriorityAndFairness(
 		}
 
 		// Skip tracking long running requests.
+		// apf 暂不处理 长请求
 		if longRunningRequestCheck != nil && longRunningRequestCheck(r, requestInfo) {
 			klog.V(6).Infof("Serving RequestInfo=%#+v, user.Info=%#+v as longrunning\n", requestInfo, user)
 			handler.ServeHTTP(w, r)
