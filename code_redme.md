@@ -2,6 +2,10 @@
 
 ## 1 http 请求流程分析
 
+以 apf 的处理流程为例，把 http 的处理流程串起来。
+
+apf 相关参数 "--feature-gates=APIPriorityAndFairness=true --runtime-config=flowcontrol.apiserver.k8s.io/v1alpha1=true"。
+
 1 
 
 k8s.io/apiserver/pkg/endpoints/filters/requestInfo.go:WithRequestInfo 
