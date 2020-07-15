@@ -32,3 +32,25 @@ comment:
 
 k8s.io/apiserver/pkg/server/config.go:DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) 会调用这两个函数。
 DefaultBuildHandlerChain 中，构建了 filter 链，先注册的后调用。
+
+## authn & authz & admission
+
+* authn: 用户合法性 [如用户名/密码] 认证
+* authz: 验证用户对其 http 请求中的 资源是否有访问权限
+* admission: 通过如 webhook 方式让第三方实现的验证用户是否对某资源有访问权限
+
+## apiserver 的代码目录 
+
+staging/src/k8s.io/apiserver/pkg/apis 目录下各个子 目录 如下：
+
+* admission      第三方认证
+* apis           对外提供的接口
+* audit          用户动作审计
+* authentication 用户认证
+* authorization  用户授权
+* endpoints      用户访问 filter 链路等
+* features       as 接口列表
+* registry       etcd 的使用接口
+* server         apiserver 自身的逻辑
+* storage        etcd 数据库访问
+* util           flowcontrol 等扩展功能
