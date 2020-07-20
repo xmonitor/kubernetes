@@ -46,8 +46,8 @@ staging/src/k8s.io/apiserver/pkg/apis 目录下各个子 目录 如下：
 * admission      第三方认证
 * apis           对外提供的接口
 * audit          用户动作审计
-* authentication 用户认证
-* authorization  用户授权
+* authentication 用户认证，认证时获取到的 User\Group\Org 等信息存入 RequestInfo
+* authorization  用户授权，主要是 RBAC
 * endpoints      用户访问 filter 链路等
 * features       as 接口列表
 * registry       etcd 的使用接口
