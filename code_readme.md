@@ -33,13 +33,13 @@ comment:
 k8s.io/apiserver/pkg/server/config.go:DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) 会调用这两个函数。
 DefaultBuildHandlerChain 中，构建了 filter 链，先注册的后调用。
 
-## authn & authz & admission
+## 2 authn & authz & admission
 
 * authn: 用户合法性 [如用户名/密码] 认证
 * authz: 验证用户对其 http 请求中的 资源是否有访问权限
 * admission: 通过如 webhook 方式让第三方实现的验证用户是否对某资源有访问权限
 
-## apiserver 的代码目录 
+## 3 apiserver 的代码目录 
 
 staging/src/k8s.io/apiserver/pkg/apis 目录下各个子 目录 如下：
 
@@ -54,3 +54,107 @@ staging/src/k8s.io/apiserver/pkg/apis 目录下各个子 目录 如下：
 * server         apiserver 自身的逻辑
 * storage        etcd 数据库访问
 * util           flowcontrol 等扩展功能
+
+## 4 apiserver 内置用户 “apiserver-loopback-client”
+
+常量定义：
+
+```Go
+    // staging/src/k8s.io/apiserver/pkg/server/config_selfclient.go
+    
+    // LoopbackClientServerNameOverride is passed to the apiserver from the loopback client in order to
+    // select the loopback certificate via SNI if TLS is used.
+	const LoopbackClientServerNameOverride = "apiserver-loopback-client
+	
+    func (s *SecureServingInfo) NewLoopbackClientConfig(token string, loopbackCert []byte) (*restclient.Config, error) {
+    	c, err := s.NewClientConfig(loopbackCert)
+    	c.BearerToken = token
+    	c.TLSClientConfig.ServerName = LoopbackClientServerNameOverride
+    
+    	return c, nil
+	}
+	
+	// staging/src/k8s.io/apiserver/pkg/server/options/serving_with_loopback.go
+	// ApplyTo fills up serving information in the server configuration.
+func (s *SecureServingOptionsWithLoopback) ApplyTo(secureServingInfo **server.SecureServingInfo, loopbackClientConfig **rest.Config) error {
+		secureLoopbackClientConfig, err := (*secureServingInfo).NewLoopbackClientConfig(uuid.New().String(), certPem)
+		*loopbackClientConfig = secureLoopbackClientConfig
+		return nil
+	}
+```
+
+内置用户所在的 Group:
+
+```Go
+// test/integration/framework/master_utils.go
+
+func startMasterOrDir() {
+		privilegedLoopbackToken := uuid.New().String()
+	// wrap any available authorizer
+	tokens := make(map[string]*user.DefaultInfo)
+	tokens[privilegedLoopbackToken] = &user.DefaultInfo{
+		Name:   user.APIServerUser,
+		UID:    uuid.New().String(),
+		Groups: []string{user.SystemPrivilegedGroup},
+	}
+}
+```
+
+## 5 apf
+
+> 下面代码块说明给出了 apf 创建过程，说明其 qps 上限 = mutating-in-flight + in-flight
+
+```Go
+// staging/src/k8s.io/apiserver/pkg/server/options/recommended.go
+	
+// ApplyTo adds RecommendedOptions to the server configuration.
+// pluginInitializers can be empty, it is only need for additional initializers.
+func (o *RecommendedOptions) ApplyTo(config *server.RecommendedConfig) error {
+	if feature.DefaultFeatureGate.Enabled(features.APIPriorityAndFairness) {
+		config.FlowControl = utilflowcontrol.New(
+			config.SharedInformerFactory,
+			kubernetes.NewForConfigOrDie(config.ClientConfig).FlowcontrolV1alpha1(),
+			config.MaxRequestsInFlight+config.MaxMutatingRequestsInFlight,
+			config.RequestTimeout/4,
+		)
+	}
+}
+```
+
+> 确保代码 apf 中有 exempt 和 catch-all
+
+```Go
+func (cfgCtl *configController) lockAndDigestConfigObjects(newPLs []*fctypesv1a1.PriorityLevelConfiguration, newFSs []*fctypesv1a1.FlowSchema) []fsStatusUpdate {
+    cfgCtl.lock.Lock()
+    defer cfgCtl.lock.Unlock()
+    meal := cfgMeal{
+        cfgCtl:      cfgCtl,
+        newPLStates: make(map[string]*priorityLevelState),
+    }
+
+    meal.digestNewPLsLocked(newPLs)
+    meal.digestFlowSchemasLocked(newFSs)
+    meal.processOldPLsLocked()
+
+    // Supply missing mandatory PriorityLevelConfiguration objects
+    if !meal.haveExemptPL {
+        meal.imaginePL(fcboot.MandatoryPriorityLevelConfigurationExempt, cfgCtl.requestWaitLimit)
+    }
+    if !meal.haveCatchAllPL {
+        meal.imaginePL(fcboot.MandatoryPriorityLevelConfigurationCatchAll, cfgCtl.requestWaitLimit)
+    }
+
+    meal.finishQueueSetReconfigsLocked()
+
+    // The new config has been constructed
+    cfgCtl.priorityLevelStates = meal.newPLStates
+    klog.V(5).Infof("Switched to new API Priority and Fairness configuration")
+    return meal.fsStatusUpdates
+}
+```
+
+
+
+
+
+
