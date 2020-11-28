@@ -17,6 +17,7 @@ limitations under the License.
 package metrics
 
 import (
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -77,7 +78,16 @@ var (
 			Name:      "rejected_requests_total",
 			Help:      "Number of requests rejected by API Priority and Fairness system",
 		},
-		[]string{priorityLevel, flowSchema, "reason"},
+		[]string{"user", priorityLevel, flowSchema, "reason"},
+	)
+	apiserverFsMonitorRequestsTotal = compbasemetrics.NewCounterVec(
+		&compbasemetrics.CounterOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "apiserver_flowschema_monitor_stat",
+			Help:      "Counter of apiserver requests broken out for each verb, Number of requests rejected by API Priority and Fairness system",
+		},
+		[]string{"user", priorityLevel, flowSchema, "verb"},
 	)
 	apiserverDispatchedRequestsTotal = compbasemetrics.NewCounterVec(
 		&compbasemetrics.CounterOpts{
@@ -147,6 +157,7 @@ var (
 	)
 	metrics = []compbasemetrics.Registerable{
 		apiserverRejectedRequestsTotal,
+		apiserverFsMonitorRequestsTotal,
 		apiserverDispatchedRequestsTotal,
 		apiserverCurrentInqueueRequests,
 		apiserverRequestQueueLength,
@@ -156,6 +167,42 @@ var (
 		apiserverRequestExecutionSeconds,
 	}
 )
+
+var (
+	// all from sigma-apps-fs.yaml
+	sigmaAppsNamespaces = []string{
+		"antsparkonsigmajob",
+		"antsparkoperator",
+		"blink-operator",
+		"kepler-cluster-1",
+		"kepler-cluster-gray",
+		"kepler-job-1",
+		"kepler-job-gray",
+		"kepler-operator",
+		"kepler-ops-operator",
+		"knative-serving",
+		"kubemaker",
+		"ray-operator",
+		"serverlessoperator",
+		"spark-operator",
+	}
+)
+
+func init() {
+	sort.Strings(sigmaAppsNamespaces)
+}
+
+func isSigAppsNamespace(ns string) bool {
+	pos := sort.SearchStrings(sort.StringSlice(sigmaAppsNamespaces), ns)
+	if pos < 0 || len(sigmaAppsNamespaces) <= pos {
+		return false
+	}
+	if sigmaAppsNamespaces[pos] != ns {
+		return false
+	}
+
+	return true
+}
 
 // AddRequestsInQueues adds the given delta to the gauge of the # of requests in the queues of the specified flowSchema and priorityLevel
 func AddRequestsInQueues(priorityLevel, flowSchema string, delta int) {
@@ -173,8 +220,27 @@ func UpdateSharedConcurrencyLimit(priorityLevel string, limit int) {
 }
 
 // AddReject increments the # of rejected requests for flow control
-func AddReject(priorityLevel, flowSchema, reason string) {
-	apiserverRejectedRequestsTotal.WithLabelValues(priorityLevel, flowSchema, reason).Add(1)
+func AddReject(user, namespace, priorityLevel, flowSchema, reason string) {
+	if len(user) != 0 || len(namespace) != 0 {
+		if isSigAppsNamespace(namespace) {
+			user = "ns:" + namespace
+		} else {
+			user = "user:" + user
+		}
+	}
+
+	apiserverRejectedRequestsTotal.WithLabelValues(user, priorityLevel, flowSchema, reason).Add(1)
+}
+
+// AddFsMonitor increments the # of requests for flow control
+func AddFsMonitor(user, namespace, pl, fs, verb string) {
+	if isSigAppsNamespace(namespace) {
+		user = "ns:" + namespace
+	} else {
+		user = "user:" + user
+	}
+
+	apiserverFsMonitorRequestsTotal.WithLabelValues(user, pl, fs, verb).Add(1)
 }
 
 // AddDispatch increments the # of dispatched requests for flow control

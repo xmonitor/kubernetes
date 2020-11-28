@@ -216,6 +216,12 @@ const (
 	decisionCancel
 )
 
+const (
+	RejectQPSOverLimit = "concurrency-limit"
+	RejectQFull = "queue-full"
+	RejectTimeout = "time-out"
+)
+
 // StartRequest begins the process of handling a request.  We take the
 // approach of updating the metrics about total requests queued and
 // executing at each point where there is a change in that quantity,
@@ -232,7 +238,16 @@ func (qs *queueSet) StartRequest(ctx context.Context, hashValue uint64, fsName s
 	if qs.qCfg.DesiredNumQueues < 1 {
 		if qs.totRequestsExecuting >= qs.dCfg.ConcurrencyLimit {
 			klog.V(5).Infof("QS(%s): rejecting request %q %#+v %#+v because %d are executing and the limit is %d", qs.qCfg.Name, fsName, descr1, descr2, qs.totRequestsExecuting, qs.dCfg.ConcurrencyLimit)
-			metrics.AddReject(qs.qCfg.Name, fsName, "concurrency-limit")
+			var user, namespace string
+			userIf := ctx.Value("request-user")
+			if userIf != nil {
+				user, _ = userIf.(string)
+			}
+			namespaceIf := ctx.Value("request-namespace")
+			if namespaceIf != nil {
+				namespace, _ = namespaceIf.(string)
+			}
+			metrics.AddReject(user, namespace, qs.qCfg.Name, req.fsName, RejectQPSOverLimit)
 			return nil, qs.isIdleLocked()
 		}
 		req = qs.dispatchSansQueueLocked(ctx, fsName, descr1, descr2)
@@ -251,7 +266,16 @@ func (qs *queueSet) StartRequest(ctx context.Context, hashValue uint64, fsName s
 	// concurrency shares and at max queue length already
 	if req == nil {
 		klog.V(5).Infof("QS(%s): rejecting request %q %#+v %#+v due to queue full", qs.qCfg.Name, fsName, descr1, descr2)
-		metrics.AddReject(qs.qCfg.Name, fsName, "queue-full")
+		var user, namespace string
+		userIf := ctx.Value("request-user")
+		if userIf != nil {
+			user, _ = userIf.(string)
+		}
+		namespaceIf := ctx.Value("request-namespace")
+		if namespaceIf != nil {
+			namespace, _ = namespaceIf.(string)
+		}
+		metrics.AddReject(user, namespace, qs.qCfg.Name, fsName, RejectQFull)
 		return nil, qs.isIdleLocked()
 	}
 
@@ -327,7 +351,17 @@ func (req *request) wait() (bool, bool) {
 	switch decision {
 	case decisionReject:
 		klog.V(5).Infof("QS(%s): request %#+v %#+v timed out after being enqueued\n", qs.qCfg.Name, req.descr1, req.descr2)
-		metrics.AddReject(qs.qCfg.Name, req.fsName, "time-out")
+
+		var user, namespace string
+		userIf := req.ctx.Value("request-user")
+		if userIf != nil {
+			user, _ = userIf.(string)
+		}
+		namespaceIf := req.ctx.Value("request-namespace")
+		if namespaceIf != nil {
+			namespace, _ = namespaceIf.(string)
+		}
+		metrics.AddReject(user, namespace, qs.qCfg.Name, req.fsName, RejectTimeout)
 		return false, qs.isIdleLocked()
 	case decisionCancel:
 		// TODO(aaron-prindle) add metrics for this case

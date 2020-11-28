@@ -83,10 +83,30 @@ func NewTestable(
 	return newTestableController(informerFactory, flowcontrolClient, serverConcurrencyLimit, requestWaitLimit, queueSetFactory)
 }
 
+func contains(arr []string, s string) bool {
+	for _, e := range arr {
+		if e == s {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (cfgCtl *configController) Handle(ctx context.Context, requestDigest RequestDigest,
 	noteFn func(fs *fctypesv1a1.FlowSchema, pl *fctypesv1a1.PriorityLevelConfiguration),
 	execFn func()) {
+
+	ctx = context.WithValue(ctx, "request-user", requestDigest.User.GetName())
+	ctx = context.WithValue(ctx, "request-namespace", requestDigest.RequestInfo.Namespace)
 	fs, pl, isExempt, req, startWaitingTime := cfgCtl.startRequest(ctx, requestDigest)
+	if !contains(requestDigest.User.GetGroups(), "system:nodes") {
+		verb := requestDigest.RequestInfo.ListVerb
+		if len(verb) == 0 {
+			verb = requestDigest.RequestInfo.Verb
+		}
+		metrics.AddFsMonitor(requestDigest.User.GetName(), requestDigest.RequestInfo.Namespace, pl.Name, fs.Name, verb)
+	}
 	queued := startWaitingTime != time.Time{}
 	noteFn(fs, pl)
 	if req == nil {
