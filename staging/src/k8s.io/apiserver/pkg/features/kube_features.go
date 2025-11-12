@@ -150,6 +150,12 @@ const (
 	//
 	// Allows sending warning headers in API responses.
 	WarningHeaders featuregate.Feature = "WarningHeaders"
+
+	// owner: @AlexStocks
+	// beta: v1.19
+	//
+	// k8s filter demo
+	FilterDemo featuregate.Feature = "FilterDemo"
 )
 
 func init() {
@@ -176,4 +182,5 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
 	RemoveSelfLink:          {Default: false, PreRelease: featuregate.Alpha},
 	SelectorIndex:           {Default: true, PreRelease: featuregate.Beta},
 	WarningHeaders:          {Default: true, PreRelease: featuregate.Beta},
+	FilterDemo:              {Default: true, PreRelease: featuregate.Beta},
 }

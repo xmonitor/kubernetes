@@ -67,6 +67,7 @@ import (
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/component-base/logs"
 	"k8s.io/klog/v2"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	openapicommon "k8s.io/kube-openapi/pkg/common"
 	utilsnet "k8s.io/utils/net"
 
@@ -690,6 +691,12 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
 	handler = genericapifilters.WithWarningRecorder(handler)
 	handler = genericapifilters.WithCacheControl(handler)
 	handler = genericfilters.WithPanicRecovery(handler)
+	// demo filter
+	if utilfeature.DefaultFeatureGate.Enabled(features.FilterDemo) {
+		handler = genericfilters.WrapDemoHandler(handler, "hello1\n")
+		handler = genericfilters.WrapDemoHandler(handler, "hello2\n")
+	}
+
 	return handler
 }
 
